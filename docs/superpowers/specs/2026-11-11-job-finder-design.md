@@ -121,11 +121,12 @@ Applies to jobs above the **score cutoff** (default 60; set in the dashboard). T
 
 | Tier | Who | What it gets | Model |
 |---|---|---|---|
-| Top | Top-ranked jobs, limited per day by budget | Full resume rewrite, cover letter, custom answers to open questions ("why us?") | Premium model (Claude-class) via OpenRouter |
-| Middle | Above cutoff, not top | Bullet reordering + rephrasing to the job's keywords, short cover letter if the form requires one | Cheap model |
+| Top | Top-ranked jobs, limited per day by budget | Full resume rewrite, custom answers to open questions ("why us?"), cover letter only when needed (see below) | Premium model (Claude-class) via OpenRouter |
+| Middle | Above cutoff, not top | Bullet reordering + rephrasing to the job's keywords, cover letter only when needed | Cheap model |
 | Bottom | Near the cutoff | Base resume + keyword pass in the skills/summary lines | Cheapest model, or none |
 
 Rules for all tiers:
+- **Cover letters are not written by default** (Sherif: not every job needs one). One is written only when the listing asks for one, or (Phase 3) when the application form has a cover letter field. Otherwise the field is left empty.
 - Output is a **structured resume** (JSON matching the base profile schema). Code renders it into a `.tex` file built from `resume.tex` (same preamble, `\role` macro, and sections), with LaTeX special characters escaped, then compiles it to PDF. The result must stay **one page**: if it overflows, trim the lowest-priority bullets and recompile. A LaTeX engine has to be installed locally; none is installed now (builder's choice, e.g. Tectonic or MacTeX via Homebrew). The base profile is parsed from `resume.tex`, which is more reliable than the PDF.
 - A **truth check** runs on every tailored resume: each bullet must trace back to a base-profile item. Code checks that no new employers, titles, dates, or numbers appear. A cheap model checks for new skill or achievement claims. Failures are regenerated or fall back to the base bullet.
 - Store a diff against the base resume (shown highlighted in the dashboard).
