@@ -3,6 +3,7 @@ import { db } from "../db/client";
 import { jobs, jobSources } from "../db/schema";
 import { toUsdYearMid } from "../sources/text";
 import { loadSettings } from "../config";
+import { prefilter } from "./prefilter";
 import type { BoardRef, NormalizedJob } from "../sources/types";
 
 const ATS_SOURCES = new Set(["greenhouse", "lever", "ashby", "workable"]);
@@ -26,7 +27,11 @@ export function jobKey(j: Pick<NormalizedJob, "companyName" | "title">): string 
 
 function rowValues(j: NormalizedJob, key: string, usd: number | null) {
   const s = j.salary;
+  // Non-engineering roles (boards list every opening a company has) are filtered out the moment they're saved.
+  const pf = prefilter(j);
   return {
+    status: pf.pass ? ("found" as const) : ("filtered_out" as const),
+    statusReason: pf.pass ? null : pf.reason,
     key, title: j.title, companyName: j.companyName, location: j.location, country: j.country,
     remotePolicy: j.remotePolicy, salaryMin: s?.min ?? null, salaryMax: s?.max ?? null,
     salaryCurrency: s?.currency ?? null, salaryPeriod: s?.period ?? null, salaryUsdYearMid: usd,
@@ -45,7 +50,7 @@ export async function upsertJobs(list: NormalizedJob[]): Promise<{ inserted: num
     const [known] = await db.select({ jobId: jobSources.jobId }).from(jobSources)
       .where(and(eq(jobSources.source, j.source), eq(jobSources.externalId, j.externalId)));
     if (known) {
-      const { key: _k, ...fields } = rowValues(j, "", usd);
+      const { key: _k, status: _s, statusReason: _r, ...fields } = rowValues(j, "", usd);
       await db.update(jobs).set({
         ...(isAts ? fields : {}),
         lastSeenAt: sql`now()`, closedAt: null,

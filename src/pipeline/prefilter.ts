@@ -1,5 +1,5 @@
 const INCLUDE = /\b(software|engineer|engineering|developer|full[- ]?stack|back[- ]?end|front[- ]?end|ai|ml|machine learning|llm|founding|product engineer)\b/i;
-const EXCLUDE = /\b(intern|internship|staff|principal|director|vp|vice president|head of|manager|sales|account executive|recruit\w*|designer|analyst|qa|tester|support|technician|mechanical|electrical|civil|hardware)\b/i;
+const EXCLUDE = /\b(intern|internship|staff|principal|director|vp|vice president|head of|manager|sales|account executive|recruit\w*|designer|analyst|qa|tester|support|technician|mechanical|electrical|civil|hardware|manufacturing|antenna|rf|chemical|structural|optical|mechatronics|process engineer|field service)\b/i;
 const TOO_SENIOR = /\b([89]|1\d)\+?\s*(years|yrs)\s+(of\s+)?(professional\s+|relevant\s+|industry\s+|hands-on\s+)?(software\s+|engineering\s+|development\s+)?(experience|exp)\b/i;
 // "Member of Technical Staff" is the standard engineer title at AI labs, not a staff-level role.
 const TECH_STAFF = /\btechnical staff\b/i;
