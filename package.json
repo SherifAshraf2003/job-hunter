@@ -1,0 +1,39 @@
+{
+  "name": "scaffold",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate && DB_URL_OVERRIDE=$(node -e \"require('dotenv').config();console.log(process.env.DATABASE_URL_TEST)\") drizzle-kit migrate",
+    "worker": "tsx src/worker/index.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@typesafe-ai/sdk": "^0.7.0",
+    "dotenv": "^18.0.10",
+    "drizzle-orm": "^0.45.4",
+    "fast-xml-parser": "^5.12.0",
+    "geist": "^1.9.2",
+    "next": "15.5.29",
+    "p-limit": "^7.3.3",
+    "postgres": "^4.1.1",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "drizzle-kit": "^0.31.11",
+    "eslint": "^9",
+    "eslint-config-next": "15.5.29",
+    "tsx": "^4.23.15",
+    "typescript": "^5",
+    "vitest": "^4.1.12"
+  }
+}
