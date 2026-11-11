@@ -27,7 +27,7 @@
 ## Review Focus
 
 1. **The tailored resume overflows one page.** Drop the lowest-priority bullet (the last project first, then the last bullet of the longest role) and recompile, up to 8 times. If it still overflows, save with `error: "does not fit one page"` and no PDF. Check: Task 4, step 2.
-2. **The model invents a number, employer, or skill, or rewrites a date.** The truth check replaces that bullet with the base bullet and records the issue, so the final resume contains only base facts. Check: Task 3, step 2.
+2. **The model invents a number, employer, or skill, or rewrites a date.** The truth check replaces that bullet with the base bullet and records the issue, so the final resume contains only base facts. Test: Task 3 (`tests/truth`), plus the live check in step 2.
 3. **LaTeX special characters in content** (`%`, `&`, `$`, `#`, `_`, `C++`, quotes). They are escaped and the PDF compiles. Check: Task 4, step 2.
 4. **Spend crosses 70% or 90% mid-cycle.** The next job's model and tier change accordingly, and spend never passes the cap. Test: Task 2 (budget tests).
 5. **Tectonic is missing or the compile fails.** The tailoring row is saved with the error and no PDF, the cycle continues, and the dashboard shows the error. Check: Task 4, step 2.
@@ -73,7 +73,7 @@ type TailoredResume = {
   includeQuote: boolean;
 };
 type TruthIssue = { where: string; problem: string; action: "reverted" | "dropped" };
-type TailoringResult = { tier: Tier; model: string; resume: TailoredResume; issues: TruthIssue[]; coverLetter: string | null; gapReport: { requirement: string; importance: "core" | "nice"; suggestion: string }[]; prep: { question: string; why: string }[]; usd: number };
+type TailoringResult = { tier: Tier; model: string; resume: TailoredResume; issues: TruthIssue[]; coverLetter: string | null; gapReport: { requirement: string; importance: "core" | "nice"; suggestion: string }[]; prep: { questions: { question: string; why: string }[]; companyNotes: string[] }; usd: number };
 ```
 - Table `tailorings`: jobId pk/fk, tier, model, resume jsonb, issues jsonb, diff jsonb, coverLetter text null, gapReport jsonb, prep jsonb, pdfPath text null, error text null, usd numeric, createdAt.
 - `config` adds `tiers: { top: 80, middle: 70, topPerDay: 5 }`.
@@ -126,11 +126,11 @@ truthCheck(r: TailoredResume, profile: BaseProfile, model: string, claimCheck?: 
   - `keywords`: the base bullets unchanged; only the headline and skill order may change.
 
   The prompt states the hard rules from Global Constraints. `estimateUsd`: 0.05 for the top model, 0.003 for the mid model. When `resumeModel` is null, the base resume is used unchanged.
-- `generateExtras`: one `chatJSON` with `extrasModel` (estimate 0.003) returning the gap report (max 6 items, each with a 1–2 day side-project suggestion when `importance` is core) and the prep (max 6 questions, from what this resume emphasizes). Cover letter: only when `wantsCoverLetter`, under 220 words, using only facts from the profile.
+- `generateExtras`: one `chatJSON` with `extrasModel` (estimate 0.003) returning the gap report (max 6 items, each with a 1–2 day side-project suggestion when `importance` is core) and the prep (max 6 questions from what this resume emphasizes, plus up to 3 company notes taken from the listing: stage, product, team; spec 6.3). Cover letter: only when `wantsCoverLetter`, under 220 words, using only facts from the profile.
 - `truthCheck`, in code:
   - every `source` must exist in the base;
   - every number in a bullet must appear in its source text;
-  - no employer/org name other than the source's own may appear;
+  - **unknown proper nouns:** any token that starts with an uppercase letter, isn't the first word of the bullet, and doesn't appear (case-insensitive) anywhere in the base profile text, and isn't on a small allowlist of generic terms (`API, APIs, UI, UX, SaaS, B2B, B2C, CI/CD, REST, SDK, MVP, KPI, KPIs, AWS, LLM, LLMs, AI, ML, IDE`), reverts the bullet. This catches invented employers ("at Google") and tools the candidate never used. Words from the job description do not count as known, because echoing a job's tool you never used is exactly the fabrication to block;
   - every skill item must exist in the base skills (case-insensitive) or be one of the source bullets' explicit technologies;
   - the headline must not claim a title the candidate never held (only words from base titles/headline plus job-domain words like "AI", "Full-Stack", "Product", "Founding").
 
@@ -139,6 +139,7 @@ truthCheck(r: TailoredResume, profile: BaseProfile, model: string, claimCheck?: 
 - [ ] **Step 1: Failing truth-check tests** (`tests/truth/truthCheck.test.ts`, base profile parsed from the real `resume.tex`, the cheap-model claim check stubbed to return no flags):
   - `reverts a bullet with an invented number`: bullet `{source:"r0b5", text:"Reduced AWS costs by 60%..."}` → text equals the base `r0b5` bullet, and the issue `action: "reverted"`.
   - `reverts a bullet naming another employer`: `"Built voice agents at Google..."` (source `r0b1`) → reverted.
+  - `reverts a bullet adding a tool from the job`: `"Developed a scalable, real-time AI voice agent on Kubernetes over Twilio"` (source `r0b1`) → reverted (Kubernetes isn't in the base).
   - `drops an unknown source`: source `r9b9` → the bullet is removed, issue `dropped`.
   - `drops a skill not in the base`: skills `[{category:"AI", items:["LLMs","Kubernetes"]}]` → `Kubernetes` dropped, `LLMs` kept.
   - `keeps a faithful rephrase`: `"Shipped a real-time Twilio AI voice agent serving concurrent users with no voice-quality loss"` (source `r0b1`) → unchanged, no issues.
@@ -188,13 +189,16 @@ diffAgainstBase(r: TailoredResume, p: BaseProfile): { section: string; base: str
 ```ts
 tailorPending(opts?: { limit?: number; generator?: { resume: typeof generateResume; extras: typeof generateExtras } }): Promise<{ tailored: number; failed: number; stoppedForBudget: boolean; byTier: Record<Tier, number> }>
 ```
+- Before each job: `canSpend("tailoring", estimate)` where estimate = resume estimate + 0.003 extras + 0.002 claim check; refused → stop (`stoppedForBudget`), no row. This check is in `tailorPending` itself, so it also holds with an injected generator.
+- `topUsedToday` = count of `tailorings` rows with `tier='top'` created since local midnight.
 - Flow per eligible job (best composite first): tier → `pickTreatment(tier, monthUsd/cap)` (recomputed before every job) → generateResume → truthCheck → fitOnePage → generateExtras → diff → insert the `tailorings` row with summed `usd` (sum of spend rows created during this job).
 - `BudgetExceededError` anywhere → stop, without a row for that job.
 - Any other error → insert a row with `error` and continue. After 3 consecutive errors, stop (same rule as scoring).
 - `CycleStats` gains `tailored`, and errors are appended as in Phase 1.
 
 - [ ] **Step 1:** Implement. `npx vitest run tests/budget` → all PASS, including Task 2's `tailorPending stops when budget would be exceeded`.
-- [ ] **Step 2: Check:** `MAX_BOARDS=0 npm run worker -- --once` against real data. The log shows `tailored N (top a, middle b, bottom c)` with a ≤ 5, `data/out/<id>/resume.pdf` exists for the tailored jobs, and month spend is still < $10.
+- Worker flag `--skip-search` (with `--once`): runs only `scorePending()` and `tailorPending()` against existing data, without fetching. (`MAX_BOARDS=0` doesn't work: `Number("0") || undefined` means no limit.)
+- [ ] **Step 2: Check:** `npm run worker -- --once --skip-search` against real data. The log shows `tailored N (top a, middle b, bottom c)` with a ≤ 5, `data/out/<id>/resume.pdf` exists for the tailored jobs, and month spend is still < $10.
 - [ ] **Step 3:** Commit `feat: tailor jobs in the search cycle`.
 
 ---
@@ -205,7 +209,7 @@ tailorPending(opts?: { limit?: number; generator?: { resume: typeof generateResu
 
 **Interfaces:**
 - `getTailoring(jobId): Promise<typeof tailorings.$inferSelect | null>`; `gapCounts(): Promise<Map<string, number>>` (normalized requirement → number of tailored jobs listing it); `stageCounts()` adds `tailored`.
-- `GET /api/pdf/[jobId]` streams `data/out/<jobId>/resume.pdf` (404 if missing), `Content-Disposition: inline; filename="Sherif-Ashraf-Mohamed-<company>.pdf"`.
+- `GET /api/pdf/[jobId]` streams `data/out/<jobId>/resume.pdf` (`jobId` must parse as a positive integer, else 400, so no path tricks; 404 if missing), `Content-Disposition: inline; filename="Sherif-Ashraf-Mohamed-<company>.pdf"`.
 
 UI (Graphite tokens, matching the approved mockup's detail panel):
 - **Stage strip:** a **Tailored** stage after Scored.
@@ -225,7 +229,7 @@ UI (Graphite tokens, matching the approved mockup's detail panel):
 
 ### Task 7: Live run and README
 
-- [ ] **Step 1:** Run `npm run worker -- --once` with real data. Then read 3 tailored PDFs (one per tier) side by side with `resume.pdf` and the job listing. Confirm the tailoring is visibly job-specific for top, lighter for middle, and minimal for bottom, with no invented facts. Record the spend per tier in the README.
+- [ ] **Step 1:** Run `npm run worker -- --once --skip-search` with real data. Then read 3 tailored PDFs (one per tier) side by side with `resume.pdf` and the job listing. Confirm the tailoring is visibly job-specific for top, lighter for middle, and minimal for bottom, with no invented facts. Record the spend per tier in the README.
 - [ ] **Step 1b: Model comparison for the top tier.** Add `--model <id>` to `scripts/tailor-one.ts`. On the highest-ranked takeable job, render the full-rewrite resume with `anthropic/claude-sonnet-5.5`, `google/gemini-3-flash-preview`, and `anthropic/claude-haiku-5.5` to `.superpowers/tmp/compare/<model>.pdf`. Show Sherif the three PDFs side by side, each with its cost and truth-check issue count, and set `OPENROUTER_TOP_MODEL` to the one he picks.
 - [ ] **Step 2:** README: Phase 2 section (tiers, models, cover-letter rule, truth check, Tectonic install, Re-tailor).
 - [ ] **Step 3:** Commit `docs: phase 2 tailoring`.
