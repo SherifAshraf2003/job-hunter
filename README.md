@@ -49,7 +49,7 @@ After scoring, every open job you can take with a score at or above the cutoff (
 
 | Tier | Which jobs | Treatment | Model (`.env`) |
 |---|---|---|---|
-| Top | Score 80+, max 5 per day | Full rewrite in the job's language | `OPENROUTER_TOP_MODEL` (Claude Sonnet 5.5) |
+| Top | Score 80+, max 5 per day | Full rewrite in the job's language | `OPENROUTER_TOP_MODEL` (Claude Haiku 5.5) |
 | Middle | Score 70+ | Reorder + light keyword rewording | `OPENROUTER_MID_MODEL` (Claude Haiku 5.5) |
 | Bottom | Score 60+ | Original bullets; headline and skill order only | `OPENROUTER_MID_MODEL` |
 

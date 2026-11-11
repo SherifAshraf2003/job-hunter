@@ -2,7 +2,7 @@ import "dotenv/config";
 import type { Config } from "../config";
 import type { Tier, Treatment } from "./types";
 
-export const TOP_MODEL = process.env.OPENROUTER_TOP_MODEL || "anthropic/claude-sonnet-5.5";
+export const TOP_MODEL = process.env.OPENROUTER_TOP_MODEL || "anthropic/claude-haiku-5.5";
 export const MID_MODEL = process.env.OPENROUTER_MID_MODEL || "anthropic/claude-haiku-5.5";
 
 /** Best composite first: top until today's top-tier limit is used, then middle/bottom by threshold. */
@@ -27,6 +27,6 @@ export function pickTreatment(tier: Tier, monthSpendRatio: number): Treatment {
 
 /** Upper-bound cost of one job's tailoring (resume + extras + claim check), used for the budget check. */
 export function estimateUsd(t: Treatment): number {
-  const resume = t.resumeModel === TOP_MODEL ? 0.05 : 0.003;
+  const resume = t.rewrite === "full" ? 0.02 : 0.003;
   return resume + 0.003 + 0.002;
 }
