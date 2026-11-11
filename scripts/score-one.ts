@@ -11,6 +11,9 @@ async function main() {
   ok(!pf("Account Executive").pass, "account exec excluded");
   ok(JSON.stringify(pf("AI Engineer", "10+ years of experience")) === JSON.stringify({ pass: false, reason: "requires 8+ years" }), "10+ years excluded");
   ok(pf("Founding Engineer").pass, "founding passes");
+  ok(pf("Member of Technical Staff").pass, "member of technical staff passes");
+  ok(pf("Software Engineer", "Founded 12 years ago, we have grown fast.").pass, "'founded 12 years ago' is not an experience requirement");
+  ok(!pf("Staff Software Engineer").pass, "staff engineer still excluded");
   const d = (v: number) => ({ scope: v, company: v, pay: v, level: v, fit: v });
   ok(composite({ ...d(100), canTake: "sponsors" }, config.weights).score === 100, "composite 100");
   ok(composite({ ...d(50), canTake: "unclear" }, config.weights).score === 45, "unclear -5");

@@ -33,15 +33,20 @@ async function main() {
   let nextAt = Date.now();
   // Single loop: checks for "Run now" requests every 30s, runs the scheduled cycle when due.
   for (;;) {
-    const [req] = await db.select().from(runs).where(and(eq(runs.requested, true), isNull(runs.status))).orderBy(asc(runs.id)).limit(1);
-    if (req) await cycle(req.id);
-    else if (Date.now() >= nextAt) {
-      await cycle();
-      const { searchIntervalHours } = await loadSettings();
-      nextAt = Date.now() + searchIntervalHours * 3600_000;
+    try {
+      const [req] = await db.select().from(runs).where(and(eq(runs.requested, true), isNull(runs.status))).orderBy(asc(runs.id)).limit(1);
+      if (req) await cycle(req.id);
+      else if (Date.now() >= nextAt) {
+        await cycle();
+        const { searchIntervalHours } = await loadSettings();
+        nextAt = Date.now() + searchIntervalHours * 3600_000;
+      }
+    } catch (e) {
+      // e.g. Postgres restarted: log and keep the worker alive; the next loop retries.
+      console.error(`[${new Date().toISOString()}] worker loop error:`, (e as Error).message);
     }
     await new Promise((r) => setTimeout(r, 30_000));
   }
 }
 
-main();
+main().catch((e) => { console.error("worker crashed:", e); process.exit(1); });

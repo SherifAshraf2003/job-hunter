@@ -80,10 +80,12 @@ export function makeJevScorer(): Scorer {
     async score(job, profile): Promise<DimensionScores> {
       if (!(await canSpend("scoring", estimate))) throw new BudgetExceededError("scoring");
       const res = await client.systemOne({ state: buildScoringState(job, profile), questions });
-      const inTok = res.usage.input_tokens ?? 0, outTok = res.usage.output_tokens ?? 0;
+      const inTok = res.usage?.input_tokens, outTok = res.usage?.output_tokens;
+      // If usage isn't reported, charge the estimate so the budget cap still holds.
+      const usd = inTok == null ? estimate : Math.max((inTok * pin + (outTok ?? 0) * pout) / 1e6, 0);
       await recordSpend({
         category: "scoring", provider: "typesafe", model: res.model,
-        usd: (inTok * pin + outTok * pout) / 1e6, inputTokens: inTok, outputTokens: outTok,
+        usd, inputTokens: inTok ?? 0, outputTokens: outTok ?? 0,
       });
       const a = res.answers;
       return {

@@ -29,6 +29,18 @@ async function main() {
   ok(re.closedAt === null, "re-seen job reopens");
   const r2 = await upsertJobs([base]);
   ok(r2.inserted === 0 && r2.updated === 1 && (await db.select().from(jobSources)).length === 3, "rerun is idempotent");
+  // Review fixes: title change keeps one row; same title in two locations on one board stays two rows.
+  await resetDb();
+  await upsertJobs([base]);
+  await upsertJobs([{ ...base, title: "Senior AI Engineer" }]);
+  const t = await db.select().from(jobs);
+  ok(t.length === 1 && t[0].title === "Senior AI Engineer", `title change updates the same row (${t.length} rows)`);
+  await upsertJobs([{ ...base, externalId: "9", title: "Senior AI Engineer (US)", location: "New York", remotePolicy: "onsite" }]);
+  const t2 = await db.select().from(jobs);
+  ok(t2.length === 2 && new Set(t2.map((x) => x.location)).size === 2, `same title, other location, same board → separate rows (${t2.length})`);
+  const closedN = await markClosed({ ats: "greenhouse", slug: "acme" }, ["9"]);
+  ok(closedN === 1, "renamed job still closes when removed from board");
+  ok(jobKey({ companyName: "Acme", title: "Software Engineer - AI Platform" }) !== jobKey({ companyName: "Acme", title: "Software Engineer - Billing" }), "different teams keep different keys");
   await closeDb();
 }
 main();

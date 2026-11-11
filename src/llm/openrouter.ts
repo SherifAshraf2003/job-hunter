@@ -13,7 +13,7 @@ type ORResponse = {
   error?: { message?: string };
 };
 
-async function callOnce(model: string, system: string, user: string, category: SpendCategory) {
+async function callOnce(model: string, system: string, user: string, category: SpendCategory, estimateUsd: number) {
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -29,11 +29,13 @@ async function callOnce(model: string, system: string, user: string, category: S
     }),
     signal: AbortSignal.timeout(60_000),
   });
-  const body = (await res.json()) as ORResponse;
+  let body: ORResponse;
+  try { body = (await res.json()) as ORResponse; } catch { body = {}; }
   const u = body.usage ?? {};
-  if (u.cost != null || u.prompt_tokens) {
+  // Charge every completed call. If the provider didn't report a cost, charge the estimate so the cap still holds.
+  if (res.ok || u.prompt_tokens) {
     await recordSpend({
-      category, provider: "openrouter", model, usd: u.cost ?? 0,
+      category, provider: "openrouter", model, usd: u.cost ?? estimateUsd,
       inputTokens: u.prompt_tokens ?? 0, outputTokens: u.completion_tokens ?? 0,
     });
   }
@@ -52,7 +54,7 @@ export async function chatJSON<T>(opts: {
 }): Promise<T> {
   for (let attempt = 0; attempt < 2; attempt++) {
     if (!(await canSpend(opts.category, opts.estimateUsd))) throw new BudgetExceededError(opts.category);
-    const content = await callOnce(opts.model, opts.system, opts.user, opts.category);
+    const content = await callOnce(opts.model, opts.system, opts.user, opts.category, opts.estimateUsd);
     try {
       return parse<T>(content);
     } catch {

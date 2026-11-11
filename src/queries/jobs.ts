@@ -50,7 +50,7 @@ function rank(rows: { jobs: typeof jobs.$inferSelect; job_scores: typeof jobScor
 
 export async function listJobs(f: JobFilters, w: Weights, limit = 300): Promise<RankedJob[]> {
   const rows = await db.select().from(jobs).leftJoin(jobScores, eq(jobScores.jobId, jobs.id)).where(where(f))
-    .orderBy(desc(jobs.firstSeenAt)).limit(5000);
+    .orderBy(desc(jobs.firstSeenAt));
   const ranked = rank(rows, w, new Map())
     .filter((r) => f.minScore == null || (r.composite ?? 0) >= f.minScore)
     .sort((a, b) => a.sortGroup - b.sortGroup || (b.composite ?? -1) - (a.composite ?? -1) || +b.firstSeenAt - +a.firstSeenAt)

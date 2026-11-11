@@ -44,6 +44,7 @@ export const jobs = pgTable("jobs", {
   closedAt: ts("closed_at"),
   status: jobStatusEnum("status").notNull().default("found"),
   statusReason: text("status_reason"),
+  scoreAttempts: integer("score_attempts").notNull().default(0),
 }, (t) => [index("jobs_status").on(t.status)]);
 
 export const jobSources = pgTable("job_sources", {

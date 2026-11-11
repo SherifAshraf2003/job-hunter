@@ -5,7 +5,7 @@ import { companies, runs } from "../db/schema";
 import { fetchBoard } from "../sources/boards";
 import { BoardNotFoundError } from "../sources/http";
 import { fetchRemoteOk, fetchWwr, fetchHn } from "../sources/feeds";
-import { upsertJobs, markClosed } from "./upsert";
+import { upsertJobs, markClosed, closeStaleFeedJobs } from "./upsert";
 import { seedCompanies, addCompanies } from "../discovery/seed";
 import { scorePending } from "../scoring/scoreJobs";
 import type { BoardRef, SourceResult } from "../sources/types";
@@ -72,11 +72,13 @@ export async function runSearchCycle(opts: { runId?: number } = {}): Promise<Cyc
         harvested.push(...r.harvested);
       } catch (e) { err(name, e); }
     }
+    try { s.closed += await closeStaleFeedJobs(); } catch (e) { err("close-feed-jobs", e); }
     s.harvested = await addCompanies(harvested.map((h) => ({ ...h, name: h.slug, origin: "harvested" as const })));
 
     if (process.env.TYPESAFE_API_KEY) {
       const r = await scorePending();
       s.scored = r.scored; s.filtered = r.filtered; s.scoreFailed = r.failed; s.stoppedForBudget = r.stoppedForBudget;
+      if (r.stoppedForErrors) err("scoring", "stopped after 3 failures in a row (check TYPESAFE_API_KEY or TypeSafe status); unscored jobs will retry next search");
     } else {
       err("scoring", "TYPESAFE_API_KEY not set; scoring skipped");
     }

@@ -1,11 +1,11 @@
 import { XMLParser } from "fast-xml-parser";
-import { inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getJson, getText } from "./http";
 import { htmlToText, parseSalary, inferCountry, inferRemote } from "./text";
 import { harvestRefs } from "../discovery/boardRefs";
 import { chatJSON, BudgetExceededError, InvalidLLMOutputError } from "../llm/openrouter";
 import { db } from "../db/client";
-import { jobSources } from "../db/schema";
+import { settings } from "../db/schema";
 import type { NormalizedJob, SourceResult } from "./types";
 
 /** RemoteOK sometimes serves UTF-8 text that was decoded as Latin-1 ("â\u0080\u0094"). */
@@ -74,6 +74,23 @@ One entry per distinct role. Use the posting's own words. "url" is the best appl
 "visa" is true if they say they sponsor visas, false if they say they don't, null if not mentioned.
 If the comment is not a job posting, return {"jobs":[]}.`;
 
+/** Keeps only well-formed entries; throws InvalidLLMOutputError if the reply isn't the expected shape. */
+function validateHn(x: unknown): HnExtract {
+  const list = (x as { jobs?: unknown })?.jobs;
+  if (!Array.isArray(list)) throw new InvalidLLMOutputError("HN extraction: missing jobs array");
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  return {
+    jobs: list
+      .filter((j): j is Record<string, unknown> => !!j && typeof j === "object")
+      .map((j) => ({
+        company: str(j.company), title: str(j.title), location: str(j.location),
+        remote: j.remote === true, visa: typeof j.visa === "boolean" ? j.visa : null,
+        url: str(j.url) || null, salaryText: str(j.salaryText) || null,
+      }))
+      .filter((j) => j.company.trim() && j.title.trim()),
+  };
+}
+
 export async function fetchHn(opts: { maxComments?: number } = {}): Promise<SourceResult> {
   const search = await getJson<{ hits: { objectID: string; title: string }[] }>(
     "https://hn.algolia.com/api/v1/search_by_date?tags=story,author_whoishiring&hitsPerPage=10");
@@ -82,15 +99,10 @@ export async function fetchHn(opts: { maxComments?: number } = {}): Promise<Sour
   const thread = await getJson<HnItem>(`https://hn.algolia.com/api/v1/items/${story.objectID}`);
   const comments = (thread.children ?? []).filter((c) => c.text && c.text.length > 80);
 
-  // Skip comments already processed in an earlier run.
-  const ids = comments.map((c) => `hn:${c.id}`);
-  const done = new Set<string>();
-  for (let i = 0; i < ids.length; i += 500) {
-    const rows = await db.select({ e: jobSources.externalId }).from(jobSources)
-      .where(inArray(jobSources.externalId, ids.slice(i, i + 500).flatMap((id) => [id, `${id}:0`])));
-    rows.forEach((r) => done.add(r.e.split(":").slice(0, 2).join(":")));
-  }
-  const todo = comments.filter((c) => !done.has(`hn:${c.id}`)).slice(0, opts.maxComments ?? Infinity);
+  // Skip comments already processed in an earlier run (including ones that had no jobs or bad output).
+  const [row] = await db.select().from(settings).where(eq(settings.key, "hn_processed"));
+  const done = new Set<number>((row?.value as number[]) ?? []);
+  const todo = comments.filter((c) => !done.has(c.id)).slice(0, opts.maxComments ?? Infinity);
 
   const jobs: NormalizedJob[] = [];
   const errors: string[] = [];
@@ -98,18 +110,21 @@ export async function fetchHn(opts: { maxComments?: number } = {}): Promise<Sour
     const text = htmlToText(c.text!);
     let out: HnExtract;
     try {
-      out = await chatJSON<HnExtract>({
+      out = validateHn(await chatJSON<unknown>({
         model: process.env.OPENROUTER_CHEAP_MODEL!, system: HN_SYSTEM, user: text.slice(0, 6000),
         category: "scoring", estimateUsd: 0.002,
-      });
+      }));
     } catch (e) {
       if (e instanceof BudgetExceededError) break;
-      if (e instanceof InvalidLLMOutputError) { errors.push(`hn:${c.id} ${e.message}`); continue; }
-      throw e;
+      // One bad comment or a transient API error must not throw away the jobs already extracted.
+      errors.push(`hn:${c.id} ${(e as Error).message}`);
+      if (!(e instanceof InvalidLLMOutputError)) continue; // transient: retry next cycle
+      done.add(c.id); // bad output twice: don't pay for it again
+      continue;
     }
+    done.add(c.id);
     const permalink = `https://news.ycombinator.com/item?id=${c.id}`;
-    (out.jobs ?? []).forEach((j, idx) => {
-      if (!j.company || !j.title) return;
+    out.jobs.forEach((j, idx) => {
       const location = j.location ?? "";
       jobs.push({
         source: "hn", externalId: `hn:${c.id}:${idx}`, url: permalink, applyUrl: j.url || permalink,
@@ -122,6 +137,8 @@ export async function fetchHn(opts: { maxComments?: number } = {}): Promise<Sour
       });
     });
   }
+  const value = [...done];
+  await db.insert(settings).values({ key: "hn_processed", value }).onConflictDoUpdate({ target: settings.key, set: { value } });
   if (errors.length) console.warn(`[hn] skipped ${errors.length} comments with invalid LLM output`);
   return { jobs, harvested: harvestRefs(todo.map((c) => c.text ?? "")) };
 }
