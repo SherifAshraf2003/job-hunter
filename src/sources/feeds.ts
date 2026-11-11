@@ -139,6 +139,6 @@ export async function fetchHn(opts: { maxComments?: number } = {}): Promise<Sour
   }
   const value = [...done];
   await db.insert(settings).values({ key: "hn_processed", value }).onConflictDoUpdate({ target: settings.key, set: { value } });
-  if (errors.length) console.warn(`[hn] skipped ${errors.length} comments with invalid LLM output`);
+  if (errors.length) console.warn(`[hn] skipped ${errors.length} comments (will retry transient errors next search): ${errors[0]}`);
   return { jobs, harvested: harvestRefs(todo.map((c) => c.text ?? "")) };
 }

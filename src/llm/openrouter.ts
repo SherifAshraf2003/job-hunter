@@ -22,7 +22,8 @@ async function callOnce(model: string, system: string, user: string, category: S
       "X-Title": "job-finder",
     },
     body: JSON.stringify({
-      model,
+      // A comma-separated list becomes an OpenRouter fallback chain: the next model is tried if one is rate-limited or down.
+      ...(model.includes(",") ? { models: model.split(",").map((m) => m.trim()).filter(Boolean) } : { model }),
       messages: [{ role: "system", content: system }, { role: "user", content: user }],
       response_format: { type: "json_object" },
       usage: { include: true },
