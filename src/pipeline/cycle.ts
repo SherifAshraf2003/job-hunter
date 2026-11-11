@@ -8,11 +8,12 @@ import { fetchRemoteOk, fetchWwr, fetchHn } from "../sources/feeds";
 import { upsertJobs, markClosed, closeStaleFeedJobs } from "./upsert";
 import { seedCompanies, addCompanies } from "../discovery/seed";
 import { scorePending } from "../scoring/scoreJobs";
+import { tailorPending } from "../tailor/tailorJobs";
 import type { BoardRef, SourceResult } from "../sources/types";
 
 export type CycleStats = {
   boards: number; boardFailures: number; inserted: number; updated: number; closed: number;
-  harvested: number; seeded: number; scored: number; filtered: number; scoreFailed: number;
+  harvested: number; seeded: number; scored: number; tailored: number; tailorFailed: number; filtered: number; scoreFailed: number;
   stoppedForBudget: boolean; errors: string[];
 };
 
@@ -24,56 +25,58 @@ export async function abandonStaleRuns(): Promise<number> {
   return r.length;
 }
 
-export async function runSearchCycle(opts: { runId?: number } = {}): Promise<CycleStats> {
+export async function runSearchCycle(opts: { runId?: number; skipSearch?: boolean } = {}): Promise<CycleStats> {
   await abandonStaleRuns();
   const runId = opts.runId ?? (await db.insert(runs).values({ status: "running", startedAt: new Date() }).returning({ id: runs.id }))[0].id;
   if (opts.runId) await db.update(runs).set({ status: "running", startedAt: new Date() }).where(eq(runs.id, runId));
 
-  const s: CycleStats = { boards: 0, boardFailures: 0, inserted: 0, updated: 0, closed: 0, harvested: 0, seeded: 0, scored: 0, filtered: 0, scoreFailed: 0, stoppedForBudget: false, errors: [] };
+  const s: CycleStats = { boards: 0, boardFailures: 0, inserted: 0, updated: 0, closed: 0, harvested: 0, seeded: 0, scored: 0, tailored: 0, tailorFailed: 0, filtered: 0, scoreFailed: 0, stoppedForBudget: false, errors: [] };
   const err = (where: string, e: unknown) => s.errors.push(`${where}: ${(e as Error)?.message ?? e}`.slice(0, 300));
 
   try {
-    try { s.seeded = (await seedCompanies()).added; } catch (e) { err("seed", e); }
+    if (!opts.skipSearch) {
+      try { s.seeded = (await seedCompanies()).added; } catch (e) { err("seed", e); }
 
-    // Company boards
-    const max = Number(process.env.MAX_BOARDS) || undefined;
-    const boards = await db.select().from(companies).where(eq(companies.active, true))
-      .orderBy(sql`${companies.lastPolledAt} asc nulls first`, asc(companies.id)).limit(max ?? 1_000_000);
-    s.boards = boards.length;
-    const limit = pLimit(4);
-    await Promise.all(boards.map((b) => limit(async () => {
-      const ref: BoardRef = { ats: b.ats, slug: b.slug };
-      try {
-        const list = await fetchBoard(ref);
-        const u = await upsertJobs(list);
-        s.inserted += u.inserted; s.updated += u.updated;
-        s.closed += await markClosed(ref, list.map((j) => j.externalId));
-        await db.update(companies).set({ lastPolledAt: new Date(), failCount: 0 }).where(eq(companies.id, b.id));
-      } catch (e) {
-        s.boardFailures++;
-        err(`${b.ats}/${b.slug}`, e);
-        // Only a missing board (404) counts toward deactivation; rate limits and network blips don't.
-        if (e instanceof BoardNotFoundError) {
-          const failCount = b.failCount + 1;
-          await db.update(companies).set({ failCount, active: failCount < 3, lastPolledAt: new Date() }).where(eq(companies.id, b.id));
+      // Company boards
+      const max = Number(process.env.MAX_BOARDS) || undefined;
+      const boards = await db.select().from(companies).where(eq(companies.active, true))
+        .orderBy(sql`${companies.lastPolledAt} asc nulls first`, asc(companies.id)).limit(max ?? 1_000_000);
+      s.boards = boards.length;
+      const limit = pLimit(4);
+      await Promise.all(boards.map((b) => limit(async () => {
+        const ref: BoardRef = { ats: b.ats, slug: b.slug };
+        try {
+          const list = await fetchBoard(ref);
+          const u = await upsertJobs(list);
+          s.inserted += u.inserted; s.updated += u.updated;
+          s.closed += await markClosed(ref, list.map((j) => j.externalId));
+          await db.update(companies).set({ lastPolledAt: new Date(), failCount: 0 }).where(eq(companies.id, b.id));
+        } catch (e) {
+          s.boardFailures++;
+          err(`${b.ats}/${b.slug}`, e);
+          // Only a missing board (404) counts toward deactivation; rate limits and network blips don't.
+          if (e instanceof BoardNotFoundError) {
+            const failCount = b.failCount + 1;
+            await db.update(companies).set({ failCount, active: failCount < 3, lastPolledAt: new Date() }).where(eq(companies.id, b.id));
+          }
         }
-      }
-    })));
+      })));
 
-    // Feeds: each wrapped so one failure doesn't stop the others.
-    const feeds: [string, () => Promise<SourceResult>][] = [["remoteok", fetchRemoteOk], ["wwr", fetchWwr]];
-    if (process.env.OPENROUTER_API_KEY) feeds.push(["hn", () => fetchHn()]);
-    const harvested: BoardRef[] = [];
-    for (const [name, f] of feeds) {
-      try {
-        const r = await f();
-        const u = await upsertJobs(r.jobs);
-        s.inserted += u.inserted; s.updated += u.updated;
-        harvested.push(...r.harvested);
-      } catch (e) { err(name, e); }
+      // Feeds: each wrapped so one failure doesn't stop the others.
+      const feeds: [string, () => Promise<SourceResult>][] = [["remoteok", fetchRemoteOk], ["wwr", fetchWwr]];
+      if (process.env.OPENROUTER_API_KEY) feeds.push(["hn", () => fetchHn()]);
+      const harvested: BoardRef[] = [];
+      for (const [name, f] of feeds) {
+        try {
+          const r = await f();
+          const u = await upsertJobs(r.jobs);
+          s.inserted += u.inserted; s.updated += u.updated;
+          harvested.push(...r.harvested);
+        } catch (e) { err(name, e); }
+      }
+      try { s.closed += await closeStaleFeedJobs(); } catch (e) { err("close-feed-jobs", e); }
+      s.harvested = await addCompanies(harvested.map((h) => ({ ...h, name: h.slug, origin: "harvested" as const })));
     }
-    try { s.closed += await closeStaleFeedJobs(); } catch (e) { err("close-feed-jobs", e); }
-    s.harvested = await addCompanies(harvested.map((h) => ({ ...h, name: h.slug, origin: "harvested" as const })));
 
     if (process.env.TYPESAFE_API_KEY) {
       const r = await scorePending();
@@ -81,6 +84,15 @@ export async function runSearchCycle(opts: { runId?: number } = {}): Promise<Cyc
       if (r.stoppedForErrors) err("scoring", "stopped after 3 failures in a row (check TYPESAFE_API_KEY or TypeSafe status); unscored jobs will retry next search");
     } else {
       err("scoring", "TYPESAFE_API_KEY not set; scoring skipped");
+    }
+    if (process.env.OPENROUTER_API_KEY) {
+      try {
+        const t = await tailorPending();
+        s.tailored = t.tailored; s.tailorFailed = t.failed;
+        if (t.stoppedForBudget) err("tailoring", "monthly budget reached; tailoring resumes next month or when you raise the budget");
+        if (t.stoppedForErrors) err("tailoring", "stopped after 3 failures in a row; will retry next search");
+        (s as CycleStats & { tailoredByTier?: unknown }).tailoredByTier = t.byTier;
+      } catch (e) { err("tailoring", e); }
     }
     await db.update(runs).set({ status: "done", finishedAt: new Date(), stats: s }).where(eq(runs.id, runId));
   } catch (e) {

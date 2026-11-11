@@ -6,15 +6,16 @@ import { loadSettings } from "../config";
 
 let busy = false;
 
-async function cycle(runId?: number) {
+async function cycle(runId?: number, skipSearch = false) {
   if (busy) return;
   busy = true;
   const t0 = Date.now();
   try {
-    const s = await runSearchCycle({ runId });
+    const s = await runSearchCycle({ runId, skipSearch });
     console.log(`[${new Date().toISOString()}] cycle done in ${Math.round((Date.now() - t0) / 1000)}s: ` +
       `boards ${s.boards} (failed ${s.boardFailures}), +${s.inserted} new, ${s.updated} updated, ${s.closed} closed, ` +
-      `${s.seeded} seeded, ${s.harvested} harvested, ${s.scored} scored, ${s.filtered} filtered, ${s.scoreFailed} failed` +
+      `${s.seeded} seeded, ${s.harvested} harvested, ${s.scored} scored, ${s.filtered} filtered, ${s.scoreFailed} failed, ` +
+      `tailored ${s.tailored} (${Object.entries((s as { tailoredByTier?: Record<string, number> }).tailoredByTier ?? {}).map(([k, v]) => `${k} ${v}`).join(", ")})${s.tailorFailed ? `, ${s.tailorFailed} tailoring failed` : ""}` +
       `${s.stoppedForBudget ? ", stopped for budget" : ""}${s.errors.length ? `, ${s.errors.length} errors` : ""}`);
   } catch (e) {
     console.error("cycle crashed:", e);
@@ -25,7 +26,7 @@ async function cycle(runId?: number) {
 
 async function main() {
   if (process.argv.includes("--once")) {
-    await cycle();
+    await cycle(undefined, process.argv.includes("--skip-search"));
     await closeDb();
     return;
   }

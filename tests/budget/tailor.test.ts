@@ -40,7 +40,7 @@ test("tailorPending stops when budget would be exceeded", async () => {
   await db.insert(profile).values({ id: 1, data: parseResumeFile() });
   const [j] = await db.insert(jobs).values({ key: "a|ai engineer", title: "AI Engineer", companyName: "A", applyUrl: "https://x", status: "scored" }).returning();
   await db.insert(jobScores).values({ jobId: j.id, engine: "jev", scope: 90, company: 90, pay: 90, level: 90, fit: 90, canTake: "remote_from_egypt", canTakeConfidence: 0.9 });
-  await db.insert(spend).values({ category: "tailoring", provider: "openrouter", model: "m", usd: 9.99 });
+  await db.insert(spend).values({ category: "tailoring", provider: "openrouter", model: "m", usd: 9.995 }); // leaves $0.005, less than the cheapest treatment ($0.008)
   let called = 0;
   const fake = {
     resume: async () => { called++; throw new Error("should not be called"); },
