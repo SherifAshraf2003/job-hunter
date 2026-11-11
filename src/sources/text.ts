@@ -45,18 +45,28 @@ export function parseSalary(text: string): Salary | null {
     String.raw`(?:(${CUR_CODES.join("|")})\s*|([$£€])\s?)(\d[\d,]*(?:\.\d+)?)\s*(k)?` +
     String.raw`(?:\s*(?:-|to)\s*(?:(?:${CUR_CODES.join("|")})\s*|[$£€]\s?)?(\d[\d,]*(?:\.\d+)?)\s*(k)?)?` +
     String.raw`(?:\s*(${CUR_CODES.join("|")}))?`, "i");
-  const m = t.match(re);
-  if (!m) return null;
-  const currency = (m[1] ?? (m[2] ? CUR_SYMBOL[m[2]] : undefined) ?? m[7] ?? "USD").toUpperCase();
-  const min = num(m[3], m[4] ?? m[6]);
-  const max = m[5] ? num(m[5], m[6] ?? m[4]) : min;
-  if (!Number.isFinite(min) || min < 10) return null;
-  const after = t.slice((m.index ?? 0) + m[0].length, (m.index ?? 0) + m[0].length + 40).toLowerCase();
-  let period: Salary["period"] = "year";
-  if (/(per|\/|a)\s*(hour|hr)|hourly/.test(after)) period = "hour";
-  else if (/(per|\/|a)\s*(month|mo)\b|monthly/.test(after)) period = "month";
-  else if (max < 1000 && currency === "USD") period = "hour";
-  return { min, max, currency, period };
+  const g = new RegExp(re.source, "gi");
+  for (const m of t.matchAll(g)) {
+    const start = m.index ?? 0, end = start + m[0].length;
+    const after = t.slice(end, end + 40).toLowerCase();
+    const before = t.slice(Math.max(0, start - 100), start).toLowerCase();
+    // "$170 million in funding" and similar are not salaries.
+    if (/^\s*(million|billion|mn|bn|m\b|b\b)/.test(after)) continue;
+    const isRange = Boolean(m[5]);
+    const payContext = /salary|pay|compensation|base|ote|earnings|wage|range|annual|per year|\/\s*y(ea)?r/.test(before + " " + after);
+    if (!isRange && !payContext && !m[4]) continue;
+    // A trailing currency code ("$58,000 - $68,000 CAD") beats the leading symbol.
+    const currency = (m[7] ?? m[1] ?? (m[2] ? CUR_SYMBOL[m[2]] : undefined) ?? "USD").toUpperCase();
+    const min = num(m[3], m[4] ?? m[6]);
+    const max = m[5] ? num(m[5], m[6] ?? m[4]) : min;
+    if (!Number.isFinite(min) || min < 10 || max < min) continue;
+    let period: Salary["period"] = "year";
+    if (/(per|\/|an?)\s*(hour|hr)|hourly/.test(after)) period = "hour";
+    else if (/(per|\/|an?)\s*(month|mo)\b|monthly/.test(after)) period = "month";
+    else if (max < 1000 && currency === "USD") period = "hour";
+    return { min, max, currency, period };
+  }
+  return null;
 }
 
 /** Midpoint of a salary converted to USD per year, or null if the currency has no rate. */
