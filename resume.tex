@@ -1,0 +1,107 @@
+\documentclass[a4paper,10pt]{article}
+
+% Compiles with pdfLaTeX, including on Overleaf's default settings.
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage[scaled=0.92]{helvet}
+\else
+  \usepackage{fontspec}
+  \setsansfont{TeX Gyre Heros}[Scale=0.92]
+\fi
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage[a4paper,margin=0.5in]{geometry}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage[hidelinks]{hyperref}
+
+% Makes the PDF text map cleanly to Unicode for ATS parsers.
+\ifdefined\pdfgentounicode
+  \input{glyphtounicode}
+  \pdfgentounicode=1
+\fi
+
+\pagestyle{empty}
+% No line-end hyphenation, so keywords stay whole for ATS parsers.
+\hyphenpenalty=10000
+\exhyphenpenalty=10000
+\emergencystretch=2em
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0pt}
+\setlist[itemize]{nosep,leftmargin=1.3em,itemsep=0.5pt,topsep=1pt}
+\titleformat{\section}{\large\bfseries}{}{0em}{}[\titlerule]
+\titlespacing{\section}{0pt}{6pt}{3pt}
+
+\newcommand{\role}[3]{\textbf{#1} \hfill #3\par\textit{#2}\par}
+
+\begin{document}
+
+\begin{center}
+{\LARGE\textbf{Sherif Ashraf Mohamed}}\par\vspace{4pt}
+{\normalsize Full-Stack AI Engineer}\par\vspace{3pt}
+\small
+\href{mailto:sherifelamir2003@gmail.com}{sherifelamir2003@gmail.com} | \href{https://linkedin.com/in/sherifElamir}{linkedin.com/in/sherifElamir} | \href{https://github.com/SherifAshraf2003}{github.com/SherifAshraf2003}
+\end{center}
+
+\section{Experience}
+\role{Founding Engineer}{Dialbird}{Feb 2026 -- Oct 2026}
+\begin{itemize}
+    \item Owned the web application and a large part of the backend, shipping features from design through production for thousands of daily active users.
+    \item Developed a scalable, real-time AI voice agent served over Twilio, handling concurrent users with no loss in voice quality.
+    \item Built integrations with HubSpot, GoHighLevel, Slack, and other third-party platforms.
+    \item Built backend services for asynchronous processing using Redis, job queues, and background jobs.
+    \item Ran production on AWS, including ECS, EC2, VPCs, load balancers, and databases, with CI/CD pipelines.
+    \item Reduced AWS costs by approximately 30\% by optimizing ECS services and EC2 instances across staging and production.
+    \item Reported directly to the co-founder, connecting engineering decisions to product and business goals.
+\end{itemize}
+\textit{``I could always count on Sherif to deliver, no matter how complex the task or challenge.''} -- Omar Aboufandi, Co-Founder\par
+\vspace{3pt}
+
+\role{Founding Engineer and COO}{PlawLabs (Vulnzap, Brief)}{Apr 2025 -- Jan 2026}
+\begin{itemize}
+    \item Built and launched the frontend, VS Code extension, and MCP tool for Vulnzap, a vulnerability management platform.
+    \item Architected the developer-facing ecosystem, enabling real-time security scanning and vulnerability tracking from the IDE.
+    \item Improved detection efficiency by approximately 40\% and supported integration across multiple development pipelines using React, TypeScript, Node.js, Redis, and Supabase.
+    \item Built Brief, an AI web app that summarizes information in seconds, using Next.js, OpenRouter, Groq, and Supabase.
+\end{itemize}
+\vspace{3pt}
+
+\role{Freelance Full-Stack and AI Developer}{Upwork}{Aug 2025 -- Present}
+\begin{itemize}
+    \item Delivered client projects end to end, earning a 100\% Job Success Score across 6 completed jobs.
+\end{itemize}
+\vspace{3pt}
+
+\role{Network Operations Center Intern}{Orange Egypt}{Aug 2024 -- Sep 2024}
+\begin{itemize}
+    \item Increased KPI monitoring efficiency by 65\% by building a React and Node.js web app that analyzed Excel traffic cell data and automated custom reporting.
+\end{itemize}
+
+\section{Projects}
+\begin{itemize}
+    \item \textbf{LeadMate (Co-Founder):} Co-founded and built the infrastructure and frontend of an AI lead generation SaaS with 100 users, automating WhatsApp responses in under 3 seconds with real-time lead tracking and analytics. Tech: Next.js, Node.js, Twilio, Supabase.
+    \item \textbf{Manasetak:} Built an education platform where instructors create custom course portals, with secure session-based authentication, subscription management, and custom domains. Improved performance using server-side rendering and Incremental Static Regeneration. Tech: React, Next.js.
+    \item \textbf{AI Study Assistant:} Built a RAG application that lets users upload documents and query them through a chatbot backed by a vector database. Tech: Next.js, LangChain, Pinecone.
+\end{itemize}
+
+\section{Skills}
+\textbf{Languages:} TypeScript, JavaScript, SQL, C, C++, Python\par\vspace{2pt}
+\textbf{Frameworks and Libraries:} React, Next.js, Node.js, Tailwind CSS, LangChain\par\vspace{2pt}
+\textbf{AI:} LLMs, RAG, Voice Agents, Pinecone, MCP\par\vspace{2pt}
+\textbf{Backend:} Redis, Job Queues, Background Jobs, Upstash, Supabase, Twilio\par\vspace{2pt}
+\textbf{Cloud and Infrastructure:} AWS (ECS, EC2, VPC, Load Balancers), CI/CD\par\vspace{2pt}
+\textbf{Databases:} PostgreSQL, MySQL, MongoDB
+
+\section{Education}
+\role{B.E. in Computer Engineering}{Egypt University of Informatics (EUI)}{Sep 2021 -- Jun 2026}
+\textbf{Relevant Coursework:} Data Structures and Algorithms, Operating Systems, Computer Networks, Databases, Machine Learning, Neural Networks, Computer Vision, Information Retrieval
+
+\section{Awards}
+\begin{itemize}
+    \item \textbf{Minesweeper Robotics Challenge:} 1st place regionally for designing a robot to detect landmines in a simulated field.
+    \item \textbf{Egyptian Collegiate Programming Contest (ECPC):} Competed for three consecutive years.
+    \item \textbf{ROV Competition:} Helped design and build a submarine to perform underwater tasks.
+\end{itemize}
+
+\end{document}
