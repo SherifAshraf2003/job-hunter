@@ -43,9 +43,27 @@ npm run worker   # searches now, then every 4 hours (Settings → "Search every"
 4. **Pre-filter (free):** drops non-software, intern, staff/principal/manager titles, and 8+ years required.
 5. **Scoring (Jev):** role scope, company, pay (vs. the job's local market), level, fit, and whether you can take it from Egypt. The composite uses your weights and updates instantly when you change them.
 
+## Tailoring (Phase 2)
+
+After scoring, every open job you can take with a score at or above the cutoff (60) gets a tailored one-page resume, built from `resume.tex` with your exact layout.
+
+| Tier | Which jobs | Treatment | Model (`.env`) |
+|---|---|---|---|
+| Top | Score 80+, max 5 per day | Full rewrite in the job's language | `OPENROUTER_TOP_MODEL` (Claude Haiku 5.5) |
+| Middle | Score 70+ | Reorder + light keyword rewording | `OPENROUTER_MID_MODEL` (Claude Haiku 5.5) |
+| Bottom | Score 60+ | Original bullets; headline and skill order only | `OPENROUTER_MID_MODEL` |
+
+- **Never invents experience.** Every bullet must point to one of your real bullets. New numbers, names, or tools not on your resume revert to your original wording, and a second model checks for overstated claims. The dashboard lists anything reverted ("Show changes").
+- **Cover letters only when the listing asks for one.**
+- Each job also gets a **gap report** (what the job wants that your resume doesn't show, with a 1–2 day side project to close it) and **interview prep**.
+- Files: `data/out/<jobId>/resume.pdf`. **Re-tailor** in the dashboard redoes a job on the next search.
+- Requires Tectonic: `brew install tectonic` (the first build downloads LaTeX packages).
+- Free models are never used for tailoring (your resume is personal data).
+- `npm run worker -- --once --skip-search` scores and tailors existing jobs without searching.
+
 ## Budget
 
-Hard cap of $10/month (Settings). Scoring and HN extraction can use at most half of it, and at most 1/30 of that half per day. At about $0.00015 per Jev-scored job, that is roughly 30,000 jobs a month. When a cap is hit, scoring stops and resumes in the next search with budget left.
+Hard cap of $10/month (Settings). Above 70% of the cap the top tier drops to the middle model; above 90% everything gets the bottom treatment. Scoring and HN extraction can use at most half of it, and at most 1/30 of that half per day. At about $0.00015 per Jev-scored job, that is roughly 30,000 jobs a month. When a cap is hit, scoring stops and resumes in the next search with budget left.
 
 ## Tests
 

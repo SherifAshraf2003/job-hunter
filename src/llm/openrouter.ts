@@ -45,8 +45,14 @@ async function callOnce(model: string, system: string, user: string, category: S
 }
 
 function parse<T>(content: string): T {
-  const trimmed = content.trim().replace(/^```(?:json)?\s*|\s*```$/g, "");
-  return JSON.parse(trimmed) as T;
+  const t = content.trim();
+  try { return JSON.parse(t) as T; } catch { /* try the fallbacks below */ }
+  // Models sometimes wrap JSON in a code fence and/or add commentary around it.
+  const fenced = t.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenced) { try { return JSON.parse(fenced[1].trim()) as T; } catch { /* next */ } }
+  const first = t.indexOf("{"), last = t.lastIndexOf("}");
+  if (first >= 0 && last > first) return JSON.parse(t.slice(first, last + 1)) as T;
+  return JSON.parse(t) as T;
 }
 
 /** One JSON-mode chat call. Checks the budget first, records cost, retries once on unparseable output. */

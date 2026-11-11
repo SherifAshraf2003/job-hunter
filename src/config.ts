@@ -8,6 +8,7 @@ export const config = {
   weights: { scope: 0.26, company: 0.2, pay: 0.16, level: 0.1, fit: 0.28 } as Weights,
   cutoff: 60,
   searchIntervalHours: 4,
+  tiers: { top: 80, middle: 70, topPerDay: 5 },
   fxToUsd: { USD: 1, EUR: 1.08, GBP: 1.27, CAD: 0.73, AED: 0.272, SAR: 0.267, EGP: 0.0205, INR: 0.012 } as Record<string, number>,
 };
 

@@ -100,3 +100,22 @@ export const runs = pgTable("runs", {
   requested: boolean("requested").notNull().default(false),
   stats: jsonb("stats"),
 });
+
+export const tierEnum = pgEnum("tailor_tier", ["top", "middle", "bottom"]);
+
+export const tailorings = pgTable("tailorings", {
+  jobId: integer("job_id").primaryKey().references(() => jobs.id, { onDelete: "cascade" }),
+  tier: tierEnum("tier").notNull(),
+  model: text("model").notNull(),
+  resume: jsonb("resume"),
+  issues: jsonb("issues"),
+  diff: jsonb("diff"),
+  coverLetter: text("cover_letter"),
+  gapReport: jsonb("gap_report"),
+  prep: jsonb("prep"),
+  pdfPath: text("pdf_path"),
+  error: text("error"),
+  attempts: integer("attempts").notNull().default(1),
+  usd: numeric("usd", { mode: "number" }).notNull().default(0),
+  createdAt: ts("created_at").notNull().defaultNow(),
+}, (t) => [index("tailorings_created").on(t.createdAt)]);

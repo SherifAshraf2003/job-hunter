@@ -4,7 +4,13 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { jobs } from "@/db/schema";
 import { loadSettings } from "@/config";
-import { listJobs, getJob, stageCounts, latestRun, sourceCount, type JobFilters } from "@/queries/jobs";
+import { listJobs, getJob, stageCounts, latestRun, sourceCount, getTailoring, gapCounts, gapKey, type JobFilters } from "@/queries/jobs";
+import { rm } from "node:fs/promises";
+import path from "node:path";
+import { tailorings } from "@/db/schema";
+import { CopyButton } from "./components/CopyButton";
+import type { DiffRow } from "@/tailor/diff";
+import type { GapItem, Prep, TruthIssue } from "@/tailor/types";
 import { spendSummary } from "@/budget/budget";
 import { DIMS, FEAS_LABEL, JobRow, salaryText } from "./components/ui";
 import { RunNow } from "./components/RunNow";
@@ -24,6 +30,7 @@ const CHIPS: { key: keyof JobFilters; label: string; value: string }[] = [
 const STAGES = [
   { key: "found", label: "Found, not scored yet", count: "found" },
   { key: "scored", label: "Scored", count: "scored" },
+  { key: "tailored", label: "Resume tailored", count: "tailored" },
   { key: "filtered_out", label: "Filtered out", count: "filteredOut" },
   { key: "score_failed", label: "Scoring failed", count: "failed" },
 ] as const;
@@ -51,6 +58,20 @@ async function skipJob(formData: FormData) {
   revalidatePath("/");
 }
 
+async function retailor(formData: FormData) {
+  "use server";
+  const id = Number(formData.get("id"));
+  if (!Number.isInteger(id) || id <= 0) return;
+  await db.delete(tailorings).where(eq(tailorings.jobId, id));
+  await rm(path.join(process.cwd(), "data", "out", String(id)), { recursive: true, force: true });
+  revalidatePath("/");
+}
+
+const TABS = [
+  { key: "resume", label: "Resume" }, { key: "cover", label: "Cover letter" }, { key: "gaps", label: "Gaps" },
+  { key: "prep", label: "Interview prep" }, { key: "description", label: "Description" },
+] as const;
+
 export default async function Home({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
   const cfg = await loadSettings();
@@ -65,6 +86,12 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
   ]);
   const selectedId = sp.job ? Number(sp.job) : list[0]?.id;
   const job = selectedId ? await getJob(selectedId, cfg.weights) : null;
+  const tailoring = job ? await getTailoring(job.id) : null;
+  const gaps = tailoring ? await gapCounts() : new Map<string, number>();
+  const visibleTabs = TABS.filter((t) => t.key === "description" || (tailoring && (t.key !== "cover" || tailoring.coverLetter) && (t.key !== "gaps" || (tailoring.gapReport as GapItem[] | null)?.length) && (t.key !== "prep" || (tailoring.prep as Prep | null)?.questions?.length) && (t.key === "resume" || !tailoring.error || tailoring.pdfPath)));
+  const wanted = (sp.tab as (typeof TABS)[number]["key"]) ?? (tailoring ? "resume" : "description");
+  const tab = visibleTabs.some((t) => t.key === wanted) ? wanted : visibleTabs[0].key;
+  const showChanges = sp.changes === "1";
   const running = run?.status === "running";
   const errors = ((run?.stats as { errors?: string[] } | null)?.errors ?? []).length;
 
@@ -144,9 +171,78 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
                 <form action={skipJob}><input type="hidden" name="id" value={job.id} /><button className="btn" type="submit">Skip job</button></form>
               )}
             </div>
-            <div className="desc">
-              <h2>Job description</h2>
-              <pre>{job.descriptionText || "No description provided."}</pre>
+            {tailoring && (
+              <div className="actions" style={{ paddingTop: 8 }}>
+                {tailoring.pdfPath && <a className="btn" href={`/api/pdf/${job.id}?download=1`}>Download PDF</a>}
+                <form action={retailor}><input type="hidden" name="id" value={job.id} /><button className="btn" type="submit">Re-tailor</button></form>
+                <span className="feas" style={{ alignSelf: "center" }}>{tailoring.tier} tier, {tailoring.model.replace(/^.*\//, "")}, ${Number(tailoring.usd).toFixed(3)}</span>
+              </div>
+            )}
+            <div className="tabs" role="tablist">
+              {visibleTabs.map((t) => (
+                <Link key={t.key} role="tab" className="tab" aria-selected={tab === t.key} scroll={false} href={href(sp, { tab: t.key })}>{t.label}</Link>
+              ))}
+            </div>
+            <div className="pane">
+              {tab === "resume" && tailoring && (
+                tailoring.error && !tailoring.pdfPath ? (
+                  <div className="note">Tailoring failed: {tailoring.error}. Press Re-tailor to try again on the next search.</div>
+                ) : (
+                  <>
+                    <div className="pane-tools">
+                      <Link scroll={false} href={href(sp, { changes: showChanges ? undefined : "1" })}>{showChanges ? "Show the PDF" : "Show changes from your base resume"}</Link>
+                      <span>One page, your LaTeX layout</span>
+                    </div>
+                    {showChanges ? (
+                      <div className="textpane">
+                        {((tailoring.diff as DiffRow[] | null) ?? []).filter((d) => d.kind !== "same").map((d, i) => (
+                          <div key={i} className={`diffrow ${d.kind}`}>
+                            <div className="q">{d.section}: {d.kind === "changed" ? "reworded" : d.kind === "moved" ? "moved up" : "left out"}</div>
+                            {d.tailored && <div>{d.tailored}</div>}
+                            {d.kind === "changed" && <div className="was">Was: {d.base}</div>}
+                            {d.kind === "dropped" && <div className="was">{d.base}</div>}
+                          </div>
+                        ))}
+                        {(tailoring.issues as TruthIssue[] | null)?.length ? (
+                          <div className="issues">
+                            <h3>Reverted to your original wording</h3>
+                            {(tailoring.issues as TruthIssue[]).map((x, i) => <div key={i} className="q">{x.where}: {x.problem}</div>)}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <iframe className="pdf" title="Tailored resume" src={`/api/pdf/${job.id}#view=FitH&toolbar=0`} />
+                    )}
+                  </>
+                )
+              )}
+              {tab === "cover" && tailoring && (
+                tailoring.coverLetter ? (
+                  <div className="textpane"><pre className="plain">{tailoring.coverLetter}</pre><CopyButton text={tailoring.coverLetter} /></div>
+                ) : <div className="textpane">This listing doesn&apos;t ask for a cover letter.</div>
+              )}
+              {tab === "gaps" && tailoring && (
+                <div className="textpane">
+                  {((tailoring.gapReport as GapItem[]) ?? []).map((g, i) => (
+                    <div className="gap" key={i}>
+                      <span className="need">{g.requirement}</span>
+                      <span className={`pill ${g.importance === "core" ? "hi" : "lo"}`}>{g.importance === "core" ? "Core" : "Nice to have"}{(gaps.get(gapKey(g.requirement)) ?? 0) > 1 ? `, asked in ${gaps.get(gapKey(g.requirement))} jobs` : ""}</span>
+                      <span className="fix">{g.suggestion}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {tab === "prep" && tailoring && (
+                <div className="textpane">
+                  {((tailoring.prep as Prep | null)?.companyNotes ?? []).length > 0 && (
+                    <div className="qa"><div className="q">About them</div>{((tailoring.prep as Prep | null)?.companyNotes ?? []).map((n, i) => <p key={i} style={{ margin: "4px 0" }}>{n}</p>)}</div>
+                  )}
+                  {((tailoring.prep as Prep | null)?.questions ?? []).map((q, i) => (
+                    <div className="qa" key={i}><div>{q.question}</div><div className="q">{q.why}</div></div>
+                  ))}
+                </div>
+              )}
+              {tab === "description" && <pre className="plain">{job.descriptionText || "No description provided."}</pre>}
             </div>
           </aside>
         )}

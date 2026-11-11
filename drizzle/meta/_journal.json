@@ -15,6 +15,20 @@
       "when": 1794403726786,
       "tag": "0001_abnormal_black_cat",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794410951062,
+      "tag": "0002_melodic_nebula",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794412423167,
+      "tag": "0003_sturdy_thor",
+      "breakpoints": true
     }
   ]
 }
