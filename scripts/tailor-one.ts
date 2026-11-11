@@ -26,7 +26,7 @@ async function main() {
 
   let r = await generateResume(job, p, t);
   if (flag("inject-fake")) r.roles[0].bullets.push({ source: "r0b0", text: "Led a team of 40 engineers at Google" });
-  const { resume, issues } = await truthCheck(r, p, t.extrasModel);
+  const { resume, issues } = await truthCheck(r, p, t.extrasModel, undefined, job.descriptionText);
   r = resume;
   console.log(`headline: ${r.headline}`);
   for (const role of r.roles) {

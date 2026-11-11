@@ -89,8 +89,9 @@ export async function runSearchCycle(opts: { runId?: number; skipSearch?: boolea
       try {
         const t = await tailorPending();
         s.tailored = t.tailored; s.tailorFailed = t.failed;
-        if (t.stoppedForBudget) err("tailoring", "monthly budget reached; tailoring resumes next month or when you raise the budget");
-        if (t.stoppedForErrors) err("tailoring", "stopped after 3 failures in a row; will retry next search");
+        if (t.stoppedForBudget) { s.stoppedForBudget = true; err("tailoring", "monthly budget reached; tailoring resumes next month or when you raise the budget"); }
+        if (t.missingTectonic) err("tailoring", "Tectonic isn't installed (brew install tectonic); tailoring skipped, nothing was spent");
+        if (t.stoppedForErrors) err("tailoring", "stopped after 3 failures in a row; failed jobs retry next search (up to 3 attempts each)");
         (s as CycleStats & { tailoredByTier?: unknown }).tailoredByTier = t.byTier;
       } catch (e) { err("tailoring", e); }
     }

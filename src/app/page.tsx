@@ -88,8 +88,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
   const job = selectedId ? await getJob(selectedId, cfg.weights) : null;
   const tailoring = job ? await getTailoring(job.id) : null;
   const gaps = tailoring ? await gapCounts() : new Map<string, number>();
-  const tab = (sp.tab as (typeof TABS)[number]["key"]) ?? (tailoring ? "resume" : "description");
-  const visibleTabs = TABS.filter((t) => t.key === "description" || (tailoring && (t.key !== "cover" || tailoring.coverLetter) && (t.key !== "gaps" || (tailoring.gapReport as GapItem[] | null)?.length) && (t.key !== "prep" || (tailoring.prep as Prep | null)?.questions?.length)));
+  const visibleTabs = TABS.filter((t) => t.key === "description" || (tailoring && (t.key !== "cover" || tailoring.coverLetter) && (t.key !== "gaps" || (tailoring.gapReport as GapItem[] | null)?.length) && (t.key !== "prep" || (tailoring.prep as Prep | null)?.questions?.length) && (t.key === "resume" || !tailoring.error || tailoring.pdfPath)));
+  const wanted = (sp.tab as (typeof TABS)[number]["key"]) ?? (tailoring ? "resume" : "description");
+  const tab = visibleTabs.some((t) => t.key === wanted) ? wanted : visibleTabs[0].key;
   const showChanges = sp.changes === "1";
   const running = run?.status === "running";
   const errors = ((run?.stats as { errors?: string[] } | null)?.errors ?? []).length;
@@ -194,7 +195,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
                     </div>
                     {showChanges ? (
                       <div className="textpane">
-                        {(tailoring.diff as DiffRow[]).filter((d) => d.kind !== "same").map((d, i) => (
+                        {((tailoring.diff as DiffRow[] | null) ?? []).filter((d) => d.kind !== "same").map((d, i) => (
                           <div key={i} className={`diffrow ${d.kind}`}>
                             <div className="q">{d.section}: {d.kind === "changed" ? "reworded" : d.kind === "moved" ? "moved up" : "left out"}</div>
                             {d.tailored && <div>{d.tailored}</div>}
@@ -233,10 +234,10 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
               )}
               {tab === "prep" && tailoring && (
                 <div className="textpane">
-                  {((tailoring.prep as Prep).companyNotes ?? []).length > 0 && (
-                    <div className="qa"><div className="q">About them</div>{(tailoring.prep as Prep).companyNotes.map((n, i) => <p key={i} style={{ margin: "4px 0" }}>{n}</p>)}</div>
+                  {((tailoring.prep as Prep | null)?.companyNotes ?? []).length > 0 && (
+                    <div className="qa"><div className="q">About them</div>{((tailoring.prep as Prep | null)?.companyNotes ?? []).map((n, i) => <p key={i} style={{ margin: "4px 0" }}>{n}</p>)}</div>
                   )}
-                  {(tailoring.prep as Prep).questions.map((q, i) => (
+                  {((tailoring.prep as Prep | null)?.questions ?? []).map((q, i) => (
                     <div className="qa" key={i}><div>{q.question}</div><div className="q">{q.why}</div></div>
                   ))}
                 </div>

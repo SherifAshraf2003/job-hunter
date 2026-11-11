@@ -115,6 +115,7 @@ export const tailorings = pgTable("tailorings", {
   prep: jsonb("prep"),
   pdfPath: text("pdf_path"),
   error: text("error"),
+  attempts: integer("attempts").notNull().default(1),
   usd: numeric("usd", { mode: "number" }).notNull().default(0),
   createdAt: ts("created_at").notNull().defaultNow(),
 }, (t) => [index("tailorings_created").on(t.createdAt)]);

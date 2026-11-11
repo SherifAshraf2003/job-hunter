@@ -33,7 +33,7 @@ export function preamble(baseTex: string): string {
 }
 
 const e = latexEscape;
-const itemize = (items: string[]) => (items.length ? `\\begin{itemize}\n${items.map((i) => `    \\item ${i}`).join("\n")}\n\\end{itemize}\n` : "");
+const itemize = (items: string[]) => (items.length ? `\\begin{itemize}\n${items.map((i) => `    \\item{} ${i}`).join("\n")}\n\\end{itemize}\n` : "");
 
 export function renderTex(r: TailoredResume, p: BaseProfile, baseTex: string): string {
   const [email, ...links] = p.links;

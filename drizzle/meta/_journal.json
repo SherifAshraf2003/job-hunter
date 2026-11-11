@@ -22,6 +22,13 @@
       "when": 1794410951062,
       "tag": "0002_melodic_nebula",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794412423167,
+      "tag": "0003_sturdy_thor",
+      "breakpoints": true
     }
   ]
 }

@@ -104,3 +104,74 @@ test("a duplicated source is dropped and logged", async () => {
   expect(resume.roles[0].bullets.filter((b) => b.source === "r0b0")).toHaveLength(1);
   expect(issues.some((i) => i.where === "r0b0" && i.action === "dropped")).toBe(true);
 });
+
+// ---- Final review: ways invented content could reach the PDF ----
+import { parseVerdicts } from "@/tailor/truth";
+
+const JOB = "We use Kubernetes, gRPC, Kafka and Terraform. Experience with Go is a plus.";
+const check = (r: TailoredResume) => truthCheck(r, p, "m", noFlags, JOB);
+
+test("C1: a bullet moved to another employer is dropped", async () => {
+  const r = baseResume(p);
+  r.roles[0].bullets.push({ source: "r3b0", text: sourceText(p, "r3b0")! });
+  const { resume, issues } = await check(r);
+  expect(resume.roles[0].bullets.some((b) => b.source === "r3b0")).toBe(false);
+  expect(issues.some((i) => i.where === "r3b0" && i.action === "dropped")).toBe(true);
+});
+
+test("C1: a project under a role, or a role bullet under projects, is dropped", async () => {
+  const r = baseResume(p);
+  r.roles[0].bullets.push({ source: "p0", text: sourceText(p, "p0")! });
+  r.projects.push({ source: "r0b5", text: sourceText(p, "r0b5")! });
+  const { resume } = await check(r);
+  expect(resume.roles[0].bullets.some((b) => b.source === "p0")).toBe(false);
+  expect(resume.projects.some((b) => b.source === "r0b5")).toBe(false);
+});
+
+test("M1: non-canonical source aliases are dropped", async () => {
+  const r = baseResume(p);
+  r.roles[0].bullets.push({ source: "r0b03", text: "Built Redis job queues." });
+  const { resume } = await check(r);
+  expect(resume.roles[0].bullets.some((b) => b.source === "r0b03")).toBe(false);
+});
+
+test("C2: a skill category that isn't on the resume is dropped", async () => {
+  const r = baseResume(p);
+  r.skills = [{ category: "Kubernetes, Terraform, Go, 8 years", items: ["Redis"] }, { category: "AI", items: ["LLMs"] }];
+  const { resume } = await check(r);
+  expect(resume.skills.map((c) => c.category)).toEqual(["AI"]);
+});
+
+test.each(["Security Engineer", "Data Engineer", "Infrastructure Engineer", "AI Engineer with 100 users"])(
+  "I1: headline %s is reverted", async (h) => {
+    const r = baseResume(p); r.headline = h;
+    const { resume } = await check(r);
+    expect(resume.headline).toBe(p.headline);
+  });
+
+test("I1: honest headlines still pass", async () => {
+  for (const h of ["Founding Engineer, AI Products", "Full-Stack AI Engineer", "AI Engineer"]) {
+    const r = baseResume(p); r.headline = h;
+    expect((await check(r)).resume.headline).toBe(h);
+  }
+});
+
+test.each([
+  ["lowercase tool copied from the job", "Built kubernetes-orchestrated job queues for asynchronous processing."],
+  ["tool as the first word", "Kubernetes-based job queues and background jobs for asynchronous processing."],
+  ["tool with an inner capital", "Built backend services over gRPC with Redis and job queues."],
+  ["number written as a word", "Built backend services with a team of ten engineers using Redis."],
+  ["fullwidth digits", "Built backend services handling １０M jobs using Redis."],
+  ["look-alike Greek letter", "Built backend services on Κfka using Redis and job queues."],
+  ["tool in backticks", "Built backend services using `Kafka`, Redis, and job queues."],
+  ["another employer's name", "Built backend services at Orange for asynchronous processing using Redis."],
+])("I2: %s is reverted", async (_name, text) => {
+  const { resume } = await check(withBullet(text, "r0b3"));
+  expect(bulletFor(resume, "r0b3")!.text).toBe(sourceText(p, "r0b3"));
+});
+
+test("I3: claim-check verdicts: missing ids, bad shape, and odd spacing count as unsupported", () => {
+  expect(parseVerdicts({ verdicts: { r0b1: "ok", r0b2: "unsupported" } }, ["r0b1", "r0b2", "r0b3"])).toEqual(["r0b2", "r0b3"]);
+  expect(parseVerdicts({ flagged: ["r0b1"] }, ["r0b1", "r0b2"])).toEqual(["r0b1", "r0b2"]);
+  expect(parseVerdicts({ verdicts: { " R0B1 ": "OK" } }, ["r0b1"])).toEqual([]);
+});
