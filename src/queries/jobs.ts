@@ -1,11 +1,11 @@
 import { and, eq, inArray, isNull, isNotNull, sql, desc, type SQL } from "drizzle-orm";
 import { db } from "../db/client";
-import { jobs, jobScores, jobSources, runs } from "../db/schema";
+import { jobs, jobScores, jobSources, runs, tailorings } from "../db/schema";
 import { composite } from "../scoring/composite";
 import type { Weights } from "../config";
 
 export type JobFilters = {
-  stage?: "found" | "scored" | "filtered_out" | "score_failed";
+  stage?: "found" | "scored" | "tailored" | "filtered_out" | "score_failed";
   canTake?: boolean; salaryPosted?: boolean; minScore?: number;
   ai?: boolean; founding?: boolean; remote?: boolean; source?: string; includeClosed?: boolean;
 };
@@ -22,7 +22,10 @@ const AI_RE = "\\m(ai|ml|llm|machine learning)\\M";
 function where(f: JobFilters): SQL | undefined {
   const c: SQL[] = [];
   if (!f.includeClosed) c.push(isNull(jobs.closedAt));
-  c.push(eq(jobs.status, f.stage ?? "scored"));
+  if (f.stage === "tailored") {
+    c.push(eq(jobs.status, "scored"));
+    c.push(sql`exists (select 1 from tailorings t where t.job_id = ${jobs.id})`);
+  } else c.push(eq(jobs.status, f.stage ?? "scored"));
   if (f.salaryPosted) c.push(isNotNull(jobs.salaryMin));
   if (f.remote) c.push(eq(jobs.remotePolicy, "remote"));
   if (f.founding) c.push(sql`${jobs.title} ~* 'founding'`);
@@ -68,7 +71,8 @@ export async function getJob(id: number, w: Weights): Promise<RankedJob | null> 
 export async function stageCounts() {
   const rows = await db.select({ status: jobs.status, n: sql<number>`count(*)::int` }).from(jobs).where(isNull(jobs.closedAt)).groupBy(jobs.status);
   const get = (s: string) => rows.find((r) => r.status === s)?.n ?? 0;
-  return { found: get("found"), scored: get("scored"), filteredOut: get("filtered_out"), failed: get("score_failed") };
+  const [t] = await db.select({ n: sql<number>`count(*)::int` }).from(tailorings).innerJoin(jobs, eq(jobs.id, tailorings.jobId)).where(isNull(jobs.closedAt));
+  return { found: get("found"), scored: get("scored"), tailored: t?.n ?? 0, filteredOut: get("filtered_out"), failed: get("score_failed") };
 }
 
 export async function latestRun() {
@@ -80,3 +84,21 @@ export async function sourceCount(): Promise<number> {
   const [r] = await db.select({ n: sql<number>`count(distinct source)::int` }).from(jobSources);
   return r?.n ?? 0;
 }
+
+export async function getTailoring(jobId: number) {
+  const [t] = await db.select().from(tailorings).where(eq(tailorings.jobId, jobId));
+  return t ?? null;
+}
+
+const normReq = (s: string) => s.toLowerCase().replace(/\([^)]*\)/g, "").replace(/[^a-z0-9+#.\s]/g, " ").replace(/\s+/g, " ").trim();
+
+/** How many tailored jobs list each gap (by normalized requirement text). */
+export async function gapCounts(): Promise<Map<string, number>> {
+  const rows = await db.select({ g: tailorings.gapReport }).from(tailorings);
+  const m = new Map<string, number>();
+  for (const r of rows) for (const g of (r.g as { requirement: string }[] | null) ?? []) {
+    const k = normReq(g.requirement); m.set(k, (m.get(k) ?? 0) + 1);
+  }
+  return m;
+}
+export const gapKey = normReq;

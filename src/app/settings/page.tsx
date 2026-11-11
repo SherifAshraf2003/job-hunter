@@ -24,6 +24,11 @@ async function saveRanking(fd: FormData) {
   await saveSetting("cutoff", Math.min(100, Math.max(0, Number(fd.get("cutoff")) || 60)));
   await saveSetting("searchIntervalHours", Math.min(48, Math.max(1, Number(fd.get("searchIntervalHours")) || 4)));
   await saveSetting("budgetUsdMonthly", Math.max(1, Number(fd.get("budgetUsdMonthly")) || 10));
+  await saveSetting("tiers", {
+    top: Math.min(100, Math.max(0, Number(fd.get("tierTop")) || 80)),
+    middle: Math.min(100, Math.max(0, Number(fd.get("tierMiddle")) || 70)),
+    topPerDay: Math.min(50, Math.max(0, Math.round(Number(fd.get("topPerDay")) || 0))),
+  });
   redirect("/settings?ok=ranking");
 }
 
@@ -73,7 +78,10 @@ export default async function Settings({ searchParams }: { searchParams: Promise
             <small>{Math.round(cfg.weights[f.key] * 100)}% now</small>
           </label>
         ))}
-        <label className="field"><span>Score cutoff</span><input name="cutoff" type="number" min="0" max="100" defaultValue={cfg.cutoff} /><small>Used for tailoring in Phase 2</small></label>
+        <label className="field"><span>Score cutoff</span><input name="cutoff" type="number" min="0" max="100" defaultValue={cfg.cutoff} /><small>Jobs below this aren't tailored</small></label>
+        <label className="field"><span>Full rewrite from score</span><input name="tierTop" type="number" min="0" max="100" defaultValue={cfg.tiers.top} /><small>Top tier, strongest model</small></label>
+        <label className="field"><span>Full rewrites per day</span><input name="topPerDay" type="number" min="0" max="50" defaultValue={cfg.tiers.topPerDay} /><small>About $0.02 each</small></label>
+        <label className="field"><span>Light tailoring from score</span><input name="tierMiddle" type="number" min="0" max="100" defaultValue={cfg.tiers.middle} /><small>Below this: headline and skill order only</small></label>
         <label className="field"><span>Search every (hours)</span><input name="searchIntervalHours" type="number" min="1" max="48" defaultValue={cfg.searchIntervalHours} /><small>Takes effect after the next search</small></label>
         <label className="field"><span>Monthly AI budget ($)</span><input name="budgetUsdMonthly" type="number" min="1" step="1" defaultValue={cfg.budgetUsdMonthly} /><small>Half is reserved for tailoring</small></label>
         <button className="btn primary" type="submit">Save ranking settings</button>
