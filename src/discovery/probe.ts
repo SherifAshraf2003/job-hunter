@@ -17,9 +17,9 @@ export function slugCandidates(name: string, website?: string, extra: string[] =
 }
 
 /** Tries each candidate slug on each ATS; a board that answers with at least one job is a hit. */
-export async function probeSlugs(name: string, website?: string, extra: string[] = []): Promise<BoardRef[]> {
+export async function probeSlugs(name: string, website?: string, extra: string[] = [], atsList: Ats[] = ATS): Promise<BoardRef[]> {
   const hits: BoardRef[] = [];
-  for (const ats of ATS) {
+  for (const ats of atsList) {
     for (const slug of slugCandidates(name, website, extra)) {
       try {
         const jobs = await fetchBoard({ ats, slug });

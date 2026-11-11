@@ -42,11 +42,13 @@ async function seedNames(): Promise<SeedName[]> {
 export async function seedCompanies(opts: { maxNames?: number } = {}): Promise<{ added: number; probed: number; remaining: number }> {
   const done = await probedSet();
   const names = (await seedNames()).filter((n) => !done.has(`${n.origin}:${n.name}`));
-  const batch = names.slice(0, opts.maxNames ?? 300);
+  const batch = names.slice(0, opts.maxNames ?? 150);
   const limit = pLimit(8);
   let added = 0;
   await Promise.all(batch.map((n) => limit(async () => {
-    const hits = await probeSlugs(n.name, n.website, n.slugs);
+    // Workable rate-limits hard and is mostly used by MENA companies, so only the Egypt list probes it.
+    const atsList = n.origin === "seed_egypt" ? undefined : (["greenhouse", "lever", "ashby"] as const).slice();
+    const hits = await probeSlugs(n.name, n.website, n.slugs, atsList);
     added += await addCompanies(hits.map((h) => ({ ...h, name: n.name, origin: n.origin })));
     done.add(`${n.origin}:${n.name}`);
   })));
