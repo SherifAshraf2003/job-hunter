@@ -19,6 +19,7 @@ export function buildScoringState(job: JobRow, p: BaseProfile) {
     candidate: {
       headline: p.headline,
       citizenship: "Egyptian citizen, lives in Egypt, no other work authorization",
+      relocation: "Willing to relocate to a Gulf (GCC) country or an EU country for an on-site or hybrid job, with an employer-sponsored work visa",
       years_of_professional_experience: p.facts.yearsExperience,
       roles: p.roles.map((r) => ({ title: r.title, org: r.org, dates: r.dates, bullets: r.bullets })),
       projects: p.projects.map((x) => `${x.name}: ${x.text}`),
