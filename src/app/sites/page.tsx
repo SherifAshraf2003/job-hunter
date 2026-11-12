@@ -143,7 +143,7 @@ export default async function Sites({ searchParams }: { searchParams: Promise<Re
         <p className="hint">Paste this token into the Job Finder Apply extension once. Regenerating it disconnects the extension until you paste the new one.</p>
         <div className="field" style={{ gridTemplateColumns: "1fr auto auto" }}>
           <code style={{ overflowWrap: "anywhere", fontSize: 12 }}>{token.slice(0, 6)}…{token.slice(-4)}</code>
-          <CopyButton text={token} />
+          <CopyButton text={token} label="Copy token" />
           {flip("token", true, "Regenerate")}
         </div>
       </section>

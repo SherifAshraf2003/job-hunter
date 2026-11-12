@@ -312,7 +312,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
               )}
               {tab === "cover" && tailoring && (
                 tailoring.coverLetter ? (
-                  <div className="textpane"><pre className="plain">{tailoring.coverLetter}</pre><CopyButton text={tailoring.coverLetter} /></div>
+                  <div className="textpane"><pre className="plain">{tailoring.coverLetter}</pre><CopyButton text={tailoring.coverLetter} label="Copy cover letter" /></div>
                 ) : <div className="textpane">This listing doesn&apos;t ask for a cover letter.</div>
               )}
               {(tab === "gaps" || tab === "prep") && tailoring && !tailoring.gapReport && (
