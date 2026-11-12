@@ -3,7 +3,6 @@ import type { BaseProfile } from "../profile/types";
 import type { JobRow } from "../scoring/types";
 import type { GapItem, Prep, TailoredResume, Treatment } from "./types";
 import { baseResume } from "./truth";
-import { TOP_MODEL } from "./tiers";
 
 const RULES = `Hard rules (never break these):
 - Use ONLY facts from the candidate's resume. Never add employers, titles, dates, numbers, team sizes, outcomes, tools, or skills that aren't in the source bullet.
@@ -56,7 +55,7 @@ export async function generateResume(job: JobRow, profile: BaseProfile, t: Treat
   const base = baseResume(profile);
   if (!t.resumeModel) return base;
   const out = await chatJSON<Partial<TailoredResume>>({
-    model: t.resumeModel, category: "tailoring", estimateUsd: t.resumeModel === TOP_MODEL ? 0.05 : 0.003,
+    model: t.resumeModel, category: "tailoring", estimateUsd: t.rewrite === "full" ? 0.02 : 0.003,
     system: `You tailor a software engineer's one-page resume to a specific job.\n${MODE[t.rewrite]}\n\n${RULES}\n
 Return JSON: {"headline": string, "roles": [{"roleIdx": number, "bullets": [{"source": string, "text": string}]}], "projects": [{"source": string, "text": string}], "skills": [{"category": string, "items": string[]}], "includeQuote": boolean}`,
     user: JSON.stringify({ job: jobForPrompt(job), resume: profileForPrompt(profile) }),
@@ -79,14 +78,23 @@ Return JSON: {"headline": string, "roles": [{"roleIdx": number, "bullets": [{"so
   return ensureRoles(r, profile);
 }
 
-export async function generateExtras(job: JobRow, profile: BaseProfile, t: Treatment, wantsCoverLetter: boolean): Promise<{ gapReport: GapItem[]; prep: Prep; coverLetter: string | null }> {
+/**
+ * Optional per-job extras. Tailoring only asks for the cover letter (when the listing wants one);
+ * the gap report and interview prep are generated on demand from the dashboard.
+ */
+export async function generateExtras(job: JobRow, profile: BaseProfile, t: Treatment, want: { coverLetter: boolean; insights: boolean }): Promise<{ gapReport: GapItem[] | null; prep: Prep | null; coverLetter: string | null }> {
+  const fields: string[] = [];
+  if (want.insights) fields.push(
+    ` "gapReport": [{"requirement": string, "importance": "core"|"nice", "suggestion": string}],   // up to 6 requirements the job asks for that the resume doesn't show. For "core" ones, suggest a concrete 1-2 day side project that would make it true; for "nice" ones, a one-line way to address it.`,
+    ` "prep": {"questions": [{"question": string, "why": string}], "companyNotes": string[]},       // up to 6 interview questions likely from what his resume emphasizes for this job, and up to 3 short notes about the company taken from the listing (stage, product, team)`,
+  );
+  if (want.coverLetter) fields.push(` "coverLetter": string  // under 220 words, specific to this job, plain and direct, only real facts`);
+  if (!fields.length) return { gapReport: null, prep: null, coverLetter: null };
   const out = await chatJSON<{ gapReport?: GapItem[]; prep?: Prep; coverLetter?: string | null }>({
     model: t.extrasModel, category: "tailoring", estimateUsd: 0.003,
     system: `You help a software engineer prepare for one job application. Use only facts from his resume; never invent experience.
 Return JSON:
-{"gapReport": [{"requirement": string, "importance": "core"|"nice", "suggestion": string}],   // up to 6 requirements the job asks for that the resume doesn't show. For "core" ones, suggest a concrete 1-2 day side project that would make it true; for "nice" ones, a one-line way to address it.
- "prep": {"questions": [{"question": string, "why": string}], "companyNotes": string[]},       // up to 6 interview questions likely from what his resume emphasizes for this job, and up to 3 short notes about the company taken from the listing (stage, product, team)
- "coverLetter": ${wantsCoverLetter ? "string  // under 220 words, specific to this job, plain and direct, only real facts" : "null"}}`,
+{${fields.join(",\n").trimStart()}}`,
     user: JSON.stringify({ job: jobForPrompt(job), resume: profileForPrompt(profile) }),
   });
   const gap = Array.isArray(out.gapReport) ? out.gapReport.filter((g) => g && typeof g.requirement === "string").slice(0, 6)
@@ -94,9 +102,9 @@ Return JSON:
   const q = Array.isArray(out.prep?.questions) ? out.prep!.questions.filter((x) => x && typeof x.question === "string").slice(0, 6) : [];
   const notes = Array.isArray(out.prep?.companyNotes) ? out.prep!.companyNotes.filter((x) => typeof x === "string").slice(0, 3) : [];
   return {
-    gapReport: gap,
-    prep: { questions: q.map((x) => ({ question: x.question, why: String(x.why ?? "") })), companyNotes: notes },
-    coverLetter: wantsCoverLetter && typeof out.coverLetter === "string" && out.coverLetter.trim() ? out.coverLetter.trim() : null,
+    gapReport: want.insights ? gap : null,
+    prep: want.insights ? { questions: q.map((x) => ({ question: x.question, why: String(x.why ?? "") })), companyNotes: notes } : null,
+    coverLetter: want.coverLetter && typeof out.coverLetter === "string" && out.coverLetter.trim() ? out.coverLetter.trim() : null,
   };
 }
 

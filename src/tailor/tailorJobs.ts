@@ -73,7 +73,7 @@ export async function tailorPending(opts: {
     try {
       const draft = await gen.resume(job, profile, t);
       const checked = await truthCheck(draft, profile, t.extrasModel, undefined, job.descriptionText);
-      // Build the PDF before paying for extras, so a LaTeX failure doesn't cost the extras call.
+      // Build the PDF before paying for the cover letter, so a LaTeX failure doesn't cost that call.
       let fit: { resume: typeof checked.resume; pdfPath: string };
       try {
         fit = await fitOnePage(checked.resume, profile, baseTex, path.join(OUT_DIR, String(job.id)));
@@ -83,10 +83,10 @@ export async function tailorPending(opts: {
         if (consecutiveErrors >= 3) { result.stoppedForErrors = true; break; }
         continue;
       }
-      const extras = await gen.extras(job, profile, t, wantsCoverLetter(job));
+      const extras = await gen.extras(job, profile, t, { coverLetter: wantsCoverLetter(job), insights: false });
       await save({
         resume: fit.resume, issues: checked.issues, diff: diffAgainstBase(fit.resume, profile),
-        coverLetter: extras.coverLetter, gapReport: extras.gapReport, prep: extras.prep, pdfPath: fit.pdfPath, error: null,
+        coverLetter: extras.coverLetter, pdfPath: fit.pdfPath, error: null,
       });
       result.tailored++; result.byTier[tier]++; consecutiveErrors = 0;
     } catch (e) {

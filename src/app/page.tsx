@@ -14,6 +14,10 @@ import type { GapItem, Prep, TruthIssue } from "@/tailor/types";
 import { spendSummary } from "@/budget/budget";
 import { DIMS, FEAS_LABEL, JobRow, salaryText } from "./components/ui";
 import { RunNow } from "./components/RunNow";
+import { generateExtras } from "@/tailor/generate";
+import { pickTreatment } from "@/tailor/tiers";
+import { loadProfile } from "@/profile/load";
+import { BudgetExceededError } from "@/llm/openrouter";
 
 export const dynamic = "force-dynamic";
 
@@ -67,6 +71,21 @@ async function retailor(formData: FormData) {
   revalidatePath("/");
 }
 
+async function prepareInsights(formData: FormData) {
+  "use server";
+  const id = Number(formData.get("id"));
+  if (!Number.isInteger(id) || id <= 0) return;
+  const [job] = await db.select().from(jobs).where(eq(jobs.id, id));
+  if (!job) return;
+  try {
+    const out = await generateExtras(job, await loadProfile(), pickTreatment("middle", 0), { coverLetter: false, insights: true });
+    await db.update(tailorings).set({ gapReport: out.gapReport, prep: out.prep }).where(eq(tailorings.jobId, id));
+  } catch (e) {
+    if (!(e instanceof BudgetExceededError)) throw e;
+  }
+  revalidatePath("/");
+}
+
 const TABS = [
   { key: "resume", label: "Resume" }, { key: "cover", label: "Cover letter" }, { key: "gaps", label: "Gaps" },
   { key: "prep", label: "Interview prep" }, { key: "description", label: "Description" },
@@ -88,7 +107,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
   const job = selectedId ? await getJob(selectedId, cfg.weights) : null;
   const tailoring = job ? await getTailoring(job.id) : null;
   const gaps = tailoring ? await gapCounts() : new Map<string, number>();
-  const visibleTabs = TABS.filter((t) => t.key === "description" || (tailoring && (t.key !== "cover" || tailoring.coverLetter) && (t.key !== "gaps" || (tailoring.gapReport as GapItem[] | null)?.length) && (t.key !== "prep" || (tailoring.prep as Prep | null)?.questions?.length) && (t.key === "resume" || !tailoring.error || tailoring.pdfPath)));
+  const visibleTabs = TABS.filter((t) => t.key === "description" || (tailoring && (t.key !== "cover" || tailoring.coverLetter) && (!["gaps", "prep"].includes(t.key) || tailoring.pdfPath) && (t.key === "resume" || !tailoring.error || tailoring.pdfPath)));
   const wanted = (sp.tab as (typeof TABS)[number]["key"]) ?? (tailoring ? "resume" : "description");
   const tab = visibleTabs.some((t) => t.key === wanted) ? wanted : visibleTabs[0].key;
   const showChanges = sp.changes === "1";
@@ -221,8 +240,15 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
                   <div className="textpane"><pre className="plain">{tailoring.coverLetter}</pre><CopyButton text={tailoring.coverLetter} /></div>
                 ) : <div className="textpane">This listing doesn&apos;t ask for a cover letter.</div>
               )}
-              {tab === "gaps" && tailoring && (
+              {(tab === "gaps" || tab === "prep") && tailoring && !tailoring.gapReport && (
                 <div className="textpane">
+                  <p>Gaps and interview prep aren&apos;t generated automatically, to save money. This makes one small model call (under $0.01).</p>
+                  <form action={prepareInsights}><input type="hidden" name="id" value={job.id} /><button className="btn" type="submit">Generate gaps and interview prep</button></form>
+                </div>
+              )}
+              {tab === "gaps" && !!tailoring?.gapReport && (
+                <div className="textpane">
+                  {(tailoring.gapReport as GapItem[]).length === 0 && <p>No gaps found: your resume covers what this listing asks for.</p>}
                   {((tailoring.gapReport as GapItem[]) ?? []).map((g, i) => (
                     <div className="gap" key={i}>
                       <span className="need">{g.requirement}</span>
@@ -232,7 +258,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
                   ))}
                 </div>
               )}
-              {tab === "prep" && tailoring && (
+              {tab === "prep" && !!tailoring?.gapReport && (
                 <div className="textpane">
                   {((tailoring.prep as Prep | null)?.companyNotes ?? []).length > 0 && (
                     <div className="qa"><div className="q">About them</div>{((tailoring.prep as Prep | null)?.companyNotes ?? []).map((n, i) => <p key={i} style={{ margin: "4px 0" }}>{n}</p>)}</div>

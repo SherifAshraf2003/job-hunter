@@ -39,9 +39,9 @@ async function main() {
   console.log(`projects: ${r.projects.map((x) => x.source).join(", ")} | skills: ${r.skills.map((c) => `${c.category}: ${c.items.join(", ")}`).join(" | ")}`);
   console.log(`issues (${issues.length}):`, issues.map((i) => `${i.where} ${i.action}: ${i.problem}`).join("\n  ") || "none");
 
-  const ex = await generateExtras(job, p, t, wantsCoverLetter(job));
-  console.log("gaps:", ex.gapReport.map((g) => `[${g.importance}] ${g.requirement} -> ${g.suggestion}`).join("\n  "));
-  console.log("prep:", ex.prep.questions.map((q) => q.question).join("\n  "), "\nnotes:", ex.prep.companyNotes.join(" / "));
+  const ex = await generateExtras(job, p, t, { coverLetter: wantsCoverLetter(job), insights: true });
+  console.log("gaps:", (ex.gapReport ?? []).map((g) => `[${g.importance}] ${g.requirement} -> ${g.suggestion}`).join("\n  "));
+  console.log("prep:", (ex.prep?.questions ?? []).map((q) => q.question).join("\n  "), "\nnotes:", (ex.prep?.companyNotes ?? []).join(" / "));
   console.log("cover letter:", ex.coverLetter ? `${ex.coverLetter.split(/\s+/).length} words` : "none");
 
   if (flag("pdf")) {

@@ -25,7 +25,7 @@ export function pickTreatment(tier: Tier, monthSpendRatio: number): Treatment {
   return { tier, resumeModel: MID_MODEL, extrasModel: MID_MODEL, rewrite: "keywords" };
 }
 
-/** Upper-bound cost of one job's tailoring (resume + extras + claim check), used for the budget check. */
+/** Upper-bound cost of one job's tailoring (resume + cover letter + claim check), used for the budget check. */
 export function estimateUsd(t: Treatment): number {
   const resume = t.rewrite === "full" ? 0.02 : 0.003;
   return resume + 0.003 + 0.002;

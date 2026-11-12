@@ -55,7 +55,7 @@ After scoring, every open job you can take with a score at or above the cutoff (
 
 - **Never invents experience.** Every bullet must point to one of your real bullets. New numbers, names, or tools not on your resume revert to your original wording, and a second model checks for overstated claims. The dashboard lists anything reverted ("Show changes").
 - **Cover letters only when the listing asks for one.**
-- Each job also gets a **gap report** (what the job wants that your resume doesn't show, with a 1–2 day side project to close it) and **interview prep**.
+- The **gap report** (what the job wants that your resume doesn't show, with a 1–2 day side project to close it) and **interview prep** are generated on demand: open the Gaps or Interview prep tab on a tailored job and press the button (one small model call). Tailoring itself only pays for a cover letter, and only when the listing asks for one.
 - Files: `data/out/<jobId>/resume.pdf`. **Re-tailor** in the dashboard redoes a job on the next search.
 - Requires Tectonic: `brew install tectonic` (the first build downloads LaTeX packages).
 - Free models are never used for tailoring (your resume is personal data).
