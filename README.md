@@ -61,6 +61,32 @@ After scoring, every open job you can take with a score at or above the cutoff (
 - Free models are never used for tailoring (your resume is personal data).
 - `npm run worker -- --once --skip-search` scores and tailors existing jobs without searching.
 
+## Applying (Phase 3)
+
+The Chrome extension in `extension/` fills applications in your own Chrome, using your logged-in sessions. The local app decides everything: which job is next, what goes in each field, and whether to submit. The extension only reads and fills the page.
+
+**Install once**
+1. Open `chrome://extensions`, turn on Developer mode, click **Load unpacked**, and pick the `extension/` folder.
+2. In the dashboard open **Sites & caps**, copy the extension token, and paste it into the extension (click its toolbar icon).
+3. Open **Answers** and fill in your phone, city and notice period. Forms ask for these and your resume doesn't have them.
+4. Keep `npm run dev` running. The extension checks for work every minute.
+
+While a job is being filled, Chrome shows a "Job Finder Apply started debugging this browser" bar. The extension uses it to make the background tab behave as if it were focused, because otherwise dropdowns on modern forms ignore it. The bar goes away when the job is done.
+
+**What happens to each job**
+- Tailored, open jobs you can take are queued, best score first. Jobs on sites other than Greenhouse, Lever, Ashby, Workable and LinkedIn show up under **Apply yourself**.
+- Fields are answered from your profile, then fixed rules (salary, sponsorship, work authorization, EEO), then your saved answers, then one model call for anything new. New answers are saved for you to review under **Answers**. Questions your facts can't answer are never guessed: the job goes to **Needs you**.
+- **Dry run is on by default.** The extension fills the form but never submits. Turn it off in Sites & caps when you're ready.
+- **Trust period:** the first 10 applications that would be submitted wait in **Ready to submit**. Press **Approve and submit** and the extension submits on its next pass.
+- **LinkedIn is fill-only.** The extension walks Easy Apply, stops on the review screen, and leaves the tab open for you to click Submit.
+- **Needs you** covers: no salary posted but the form asks for one, an unknown required field, a captcha, a LinkedIn review, or no confirmation after submitting. The tab stays open (up to 8). Finish it and press **I submitted it**, or press **Fill again in Chrome**.
+
+**Safety**
+- Caps (editable): LinkedIn 15 forms a day; 3 a day per company board; 60 a day overall; at most 2 applications to the same company in 30 days.
+- Random pauses between fields (0.4–1.5 s) and between jobs (90–240 s), one tab at a time.
+- Kill switch: 3 captchas in an hour on one site, an "unusual activity" page, or a logout pauses that site. Resume it in Sites & caps. **Pause everything** stops all applying.
+- LinkedIn search results are collected every search interval (5 role searches, 10 jobs each, last 24 hours) and then scored like any other source.
+
 ## Budget
 
 Hard cap of $10/month (Settings). Above 70% of the cap the top tier drops to the middle model; above 90% everything gets the bottom treatment. Scoring and HN extraction can use at most half of it, and at most 1/30 of that half per day. At about $0.00015 per Jev-scored job, that is roughly 30,000 jobs a month. When a cap is hit, scoring stops and resumes in the next search with budget left.
