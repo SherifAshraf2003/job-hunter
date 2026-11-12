@@ -9,6 +9,7 @@ import { upsertJobs, markClosed, closeStaleFeedJobs } from "./upsert";
 import { seedCompanies, addCompanies } from "../discovery/seed";
 import { scorePending } from "../scoring/scoreJobs";
 import { tailorPending } from "../tailor/tailorJobs";
+import { queueApplications } from "../apply/queue";
 import type { BoardRef, SourceResult } from "../sources/types";
 
 export type CycleStats = {
@@ -95,6 +96,11 @@ export async function runSearchCycle(opts: { runId?: number; skipSearch?: boolea
         (s as CycleStats & { tailoredByTier?: unknown }).tailoredByTier = t.byTier;
       } catch (e) { err("tailoring", e); }
     }
+    try {
+      const q = await queueApplications();
+      (s as CycleStats & { queued?: number; manual?: number }).queued = q.queued;
+      (s as CycleStats & { queued?: number; manual?: number }).manual = q.manual;
+    } catch (e) { err("queue", e); }
     await db.update(runs).set({ status: "done", finishedAt: new Date(), stats: s }).where(eq(runs.id, runId));
   } catch (e) {
     err("cycle", e);
