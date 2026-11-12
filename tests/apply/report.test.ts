@@ -71,3 +71,12 @@ test("stopped report takes the plan's status", async () => {
   await applyReport(id2, { outcome: "stopped", status: "ready_to_submit" }, NOW);
   expect(await app(id2)).toMatchObject({ status: "ready_to_submit" });
 });
+
+test("submitting report marks the job submitting, and a failure after it goes to needs_you", async () => {
+  const id = await mk();
+  await applyReport(id, { outcome: "submitting" }, NOW);
+  expect(await app(id)).toMatchObject({ status: "submitting" });
+  await applyReport(id, { outcome: "failed", reason: "Tab was closed" }, NOW);
+  expect(await app(id)).toMatchObject({ status: "needs_you", attempts: 0 });
+  expect((await app(id)).reason).toMatch(/submitted\? check/i);
+});

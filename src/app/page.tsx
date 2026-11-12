@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db/client";
 import { jobs } from "@/db/schema";
 import { loadSettings } from "@/config";
@@ -66,6 +66,9 @@ async function skipJob(formData: FormData) {
   "use server";
   const id = Number(formData.get("id"));
   await db.update(jobs).set({ status: "filtered_out", statusReason: "skipped by you" }).where(eq(jobs.id, id));
+  // Skipping also takes it out of the apply queue, unless it was already sent.
+  await db.update(applications).set({ status: "skipped", reason: "Skipped by you", approved: false })
+    .where(and(eq(applications.jobId, id), inArray(applications.status, ["queued", "ready_to_submit", "needs_you", "failed", "manual"])));
   revalidatePath("/");
 }
 

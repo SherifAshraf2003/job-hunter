@@ -269,6 +269,9 @@ if (!globalThis.JF) {
 
   /** The whole flow on one page. Every exit reports exactly once. */
   JF.run = async ({ jobId, mode, pacing }) => {
+    // A second "run" for the same page (two load events) must not fill or submit twice.
+    if (JF.running) return;
+    JF.running = true;
     const a = JF.adapter;
     try {
       await sleep(1500);
@@ -294,6 +297,7 @@ if (!globalThis.JF) {
       await send({ type: "submitting", jobId });
       await sleep(rand([800, 2000]));
       await a.submit();
+      JF.confirming = true;
       return confirmLoop(jobId);
     } catch (e) {
       return done(jobId, { outcome: "failed", reason: String(e.message || e).slice(0, 200) }, false);
@@ -302,6 +306,6 @@ if (!globalThis.JF) {
 
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type === "run") JF.run(msg);
-    if (msg.type === "confirm") confirmLoop(msg.jobId);
+    if (msg.type === "confirm" && !JF.confirming) { JF.confirming = true; confirmLoop(msg.jobId); }
   });
 }

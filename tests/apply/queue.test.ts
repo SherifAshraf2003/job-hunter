@@ -121,3 +121,56 @@ test("queueApplications marks unsupported sites manual", async () => {
   expect(r).toEqual({ queued: 0, manual: 1 });
   expect((await status(id)).status).toBe("manual");
 });
+
+test("approved jobs still respect the daily caps", async () => {
+  const done = [];
+  for (let i = 0; i < 3; i++) done.push(await mkJob({ score: 60, url: `https://job-boards.greenhouse.io/acme/jobs/${i}`, company: `Acme${i}` }));
+  const ready = await mkJob({ score: 90, url: "https://job-boards.greenhouse.io/acme/jobs/9", company: "Acme9" });
+  await queueApplications();
+  for (const id of done) await setApp(id, { status: "applied", appliedAt: NOW });
+  await setApp(ready, { status: "ready_to_submit", approved: true });
+  expect(await nextApplication(NOW)).toHaveProperty("idle");
+});
+
+test("approving during dry run does not use up the trust period", async () => {
+  const id = await mkJob({ score: 80 });
+  await queueApplications();
+  await setApp(id, { status: "ready_to_submit" });
+  await saveSetting("dryRun", true);
+  await saveSetting("trustRemaining", 10);
+  await approve(id);
+  expect((await loadSettings()).trustRemaining).toBe(10);
+  await saveSetting("dryRun", false);
+  const id2 = await mkJob({ score: 70 });
+  await queueApplications();
+  await setApp(id2, { status: "ready_to_submit" });
+  await approve(id2);
+  expect((await loadSettings()).trustRemaining).toBe(9);
+});
+
+test("skipped or closed jobs are never handed out", async () => {
+  const skipped = await mkJob({ score: 95 });
+  const closed = await mkJob({ score: 90 });
+  const ok = await mkJob({ score: 50 });
+  await queueApplications();
+  await db.update(jobs).set({ status: "filtered_out" }).where(eq(jobs.id, skipped));
+  await db.update(jobs).set({ closedAt: NOW }).where(eq(jobs.id, closed));
+  expect(await nextApplication(NOW)).toMatchObject({ jobId: ok });
+});
+
+test("a stale submitting lease goes to needs_you, never back to the queue", async () => {
+  const id = await mkJob({ score: 80 });
+  await queueApplications();
+  await setApp(id, { status: "submitting", leaseAt: new Date(+NOW - 11 * 60_000) });
+  expect(await nextApplication(NOW)).toHaveProperty("idle");
+  expect(await status(id)).toMatchObject({ status: "needs_you" });
+  expect((await status(id)).reason).toMatch(/check/i);
+});
+
+test("a lease is only taken from a queued row", async () => {
+  const id = await mkJob({ score: 80 });
+  await queueApplications();
+  const [a, b] = await Promise.all([nextApplication(NOW), nextApplication(NOW)]);
+  expect([a, b].filter((r) => "jobId" in r)).toHaveLength(1);
+  expect((await status(id)).status).toBe("filling");
+});

@@ -19,7 +19,11 @@ export async function applyReport(jobId: number, r: Report, now: Date = new Date
     db.update(applications).set({ leaseAt: null, ...v }).where(eq(applications.jobId, jobId));
   const event = (kind: "captcha" | "blocked" | "login_wall") => db.insert(siteEvents).values({ site: a.site, kind, at: now, jobId });
 
+  // After the submit click the form may already be sent: nothing that happens next may put the job back in the queue.
+  const afterSubmit = a.status === "submitting";
   switch (r.outcome) {
+    case "submitting":
+      return void (await db.update(applications).set({ status: "submitting", leaseAt: now }).where(eq(applications.jobId, jobId)));
     case "applied":
       return void (await set({ status: "applied", appliedAt: now, reason: null }));
     case "stopped":
@@ -39,6 +43,7 @@ export async function applyReport(jobId: number, r: Report, now: Date = new Date
       await db.update(jobs).set({ closedAt: now }).where(eq(jobs.id, jobId));
       return void (await set({ status: "skipped", reason: "Listing closed" }));
     case "failed": {
+      if (afterSubmit) return void (await set({ status: "needs_you", reason: `Submitted? check the tab (${r.reason ?? "no confirmation"})` }));
       const attempts = a.attempts + 1;
       return void (await set({ attempts, status: attempts >= MAX_ATTEMPTS ? "failed" : a.approved ? "ready_to_submit" : "queued", reason: r.reason ?? "Failed" }));
     }

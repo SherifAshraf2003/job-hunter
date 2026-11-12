@@ -5,7 +5,7 @@ import type { Report } from "@/apply/types";
 
 export const dynamic = "force-dynamic";
 
-const OUTCOMES = new Set(["applied", "stopped", "needs_you", "closed", "failed", "captcha", "blocked", "login_wall"]);
+const OUTCOMES = new Set(["submitting", "applied", "stopped", "needs_you", "closed", "failed", "captcha", "blocked", "login_wall"]);
 
 /** What happened on the page for one job. */
 export async function POST(req: Request) {

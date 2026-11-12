@@ -36,7 +36,15 @@ export function classify(f: FormField): Kind {
   const l = lower(f.label);
   if (f.kind === "file") return /cover/.test(l) ? "cover_file" : /resume|cv\b|curriculum/.test(l) ? "resume_file" : "other";
   if (/relocat/.test(l)) return "other";
-  for (const [re, k] of KINDS) if (re.test(l)) return k;
+  // "Authorized to work in X without sponsorship?" is an authorization question: Yes would claim a right to work.
+  if (/sponsor/.test(l) && /authori[sz]ed|eligible|right to work|legally|permitted to work/.test(l)) return "work_auth";
+  for (const [re, k] of KINDS) {
+    if (!re.test(l)) continue;
+    // Current or past pay isn't the expected-salary rule; "years with React" isn't total years of experience.
+    if (k === "salary" && /current|previous|present|last|existing/.test(l)) return "other";
+    if (k === "years_experience" && /experience\b.*\b(with|in|using|on)\s+\w|years (with|in|using) /.test(l)) return "other";
+    return k;
+  }
   return "other";
 }
 

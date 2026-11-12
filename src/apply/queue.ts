@@ -36,13 +36,21 @@ export async function queueApplications(): Promise<{ queued: number; manual: num
   return out;
 }
 
-/** Leases that outlived the extension (tab closed, crash) go back where they came from, counting as an attempt. */
+/**
+ * Leases that outlived the extension (tab closed, crash). A fill goes back to the queue, counting as an attempt.
+ * A submit never does: the form may already have been sent, so it waits for Sherif to check.
+ */
 async function reclaimStaleLeases(now: Date) {
   const stale = await db.select().from(applications)
     .where(and(inArray(applications.status, ["filling", "submitting"]), lt(applications.leaseAt, new Date(+now - LEASE_MS))));
   for (const a of stale) {
+    if (a.status === "submitting") {
+      await db.update(applications).set({ status: "needs_you", leaseAt: null, reason: "Submitted? check the tab: the browser never confirmed it" })
+        .where(eq(applications.jobId, a.jobId));
+      continue;
+    }
     const attempts = a.attempts + 1;
-    const back = attempts >= MAX_ATTEMPTS ? "failed" : a.status === "submitting" ? "ready_to_submit" : "queued";
+    const back = attempts >= MAX_ATTEMPTS ? "failed" : "queued";
     await db.update(applications).set({ status: back, attempts, leaseAt: null, reason: back === "failed" ? "Gave up after 3 tries (the tab never reported back)" : a.reason })
       .where(eq(applications.jobId, a.jobId));
   }
@@ -61,7 +69,7 @@ export async function nextApplication(now: Date = new Date()): Promise<{ jobId: 
   const paused = new Set(siteRows.filter((s) => s.paused).map((s) => s.site));
   const siteCap = new Map(siteRows.filter((s) => s.dailyCap != null).map((s) => [s.site, s.dailyCap!]));
 
-  const all = await db.select({ a: applications, company: jobs.companyName, s: jobScores }).from(applications)
+  const all = await db.select({ a: applications, company: jobs.companyName, jobStatus: jobs.status, closedAt: jobs.closedAt, s: jobScores }).from(applications)
     .innerJoin(jobs, eq(jobs.id, applications.jobId))
     .innerJoin(jobScores, eq(jobScores.jobId, jobs.id));
   const d0 = dayStart(now);
@@ -76,44 +84,50 @@ export async function nextApplication(now: Date = new Date()): Promise<{ jobId: 
     companyCount.set(k, (companyCount.get(k) ?? 0) + 1);
   }
 
-  const lease = async (jobId: number, status: "filling" | "submitting") =>
-    db.update(applications).set({ status, leaseAt: now }).where(eq(applications.jobId, jobId));
+  /** Takes the job only if nobody else did in the meantime (two ticks at once must not both get it). */
+  const lease = async (jobId: number, from: "queued" | "ready_to_submit", status: "filling" | "submitting") =>
+    (await db.update(applications).set({ status, leaseAt: now })
+      .where(and(eq(applications.jobId, jobId), eq(applications.status, from))).returning({ id: applications.jobId })).length > 0;
 
-  // Approved jobs waiting to be submitted were already counted against caps when they were filled.
-  const ready = all.filter((r) => r.a.status === "ready_to_submit" && r.a.approved && !paused.has(r.a.site))
-    .sort((x, y) => composite(y.s, cfg.weights).score - composite(x.s, cfg.weights).score)[0];
-  if (ready) {
-    await lease(ready.a.jobId, "submitting");
-    return { jobId: ready.a.jobId, url: ready.a.targetUrl, site: ready.a.site, mode: "submit" };
+  let reason = "Nothing queued";
+  /** Site, board and global daily caps. Approved jobs are held by these too: approving 80 jobs must not send 80 today. */
+  const capped = (r: (typeof all)[number]) => {
+    const site = r.a.site;
+    if (site === "linkedin") return linkedinFilledToday >= (siteCap.get("linkedin") ?? cfg.caps.linkedinDaily);
+    if (siteCap.has(site) && appliedToday.filter((x) => x.a.site === site).length >= siteCap.get(site)!) return true;
+    if (appliedToday.filter((x) => x.a.boardKey === r.a.boardKey).length >= cfg.caps.perBoardDaily) return true;
+    if (atsToday >= cfg.caps.globalDaily) { reason = "Daily application cap reached"; return true; }
+    return false;
+  };
+  // Jobs Sherif skipped, and listings that closed, are never handed out.
+  const live = (r: (typeof all)[number]) => r.jobStatus !== "filtered_out" && !r.closedAt && !paused.has(r.a.site);
+  const best = (x: (typeof all)[number], y: (typeof all)[number]) => composite(y.s, cfg.weights).score - composite(x.s, cfg.weights).score;
+
+  for (const r of all.filter((r) => r.a.status === "ready_to_submit" && r.a.approved && live(r)).sort(best)) {
+    if (capped(r)) continue;
+    if (await lease(r.a.jobId, "ready_to_submit", "submitting")) return { jobId: r.a.jobId, url: r.a.targetUrl, site: r.a.site, mode: "submit" };
   }
 
-  const queued = all.filter((r) => r.a.status === "queued")
-    .sort((x, y) => composite(y.s, cfg.weights).score - composite(x.s, cfg.weights).score);
-  let reason = queued.length ? "Every queued job is held by a cap or a pause" : "Nothing queued";
+  const queued = all.filter((r) => r.a.status === "queued" && live(r)).sort(best);
+  if (queued.length && reason === "Nothing queued") reason = "Every queued job is held by a cap or a pause";
   for (const r of queued) {
-    const site = r.a.site;
-    if (paused.has(site)) continue;
-    if (site === "linkedin") {
-      if (linkedinFilledToday >= (siteCap.get("linkedin") ?? cfg.caps.linkedinDaily)) continue;
-    } else {
-      if (siteCap.has(site) && appliedToday.filter((x) => x.a.site === site).length >= siteCap.get(site)!) continue;
-      if (appliedToday.filter((x) => x.a.boardKey === r.a.boardKey).length >= cfg.caps.perBoardDaily) continue;
-      if (atsToday >= cfg.caps.globalDaily) { reason = "Daily application cap reached"; continue; }
-    }
+    if (capped(r)) continue;
     if ((companyCount.get(normCompany(r.company)) ?? 0) >= cfg.caps.perCompany30d) continue;
-    await lease(r.a.jobId, "filling");
-    return { jobId: r.a.jobId, url: r.a.targetUrl, site, mode: "fill" };
+    if (await lease(r.a.jobId, "queued", "filling")) return { jobId: r.a.jobId, url: r.a.targetUrl, site: r.a.site, mode: "fill" };
   }
   return { idle: reason };
 }
 
-/** One-click approval of a "Ready to submit" job. Each approval counts down the trust period, never below 0. */
+/**
+ * One-click approval of a "Ready to submit" job. Each approval counts down the trust period, never below 0.
+ * Approvals during dry run don't count: the trust period is about real submissions.
+ */
 export async function approve(jobId: number): Promise<void> {
   const [a] = await db.select().from(applications).where(eq(applications.jobId, jobId));
   if (!a || a.status !== "ready_to_submit" || a.approved) return;
   await db.update(applications).set({ approved: true }).where(eq(applications.jobId, jobId));
-  const { trustRemaining } = await loadSettings();
-  await saveSetting("trustRemaining", Math.max(0, trustRemaining - 1));
+  const { trustRemaining, dryRun } = await loadSettings();
+  if (!dryRun) await saveSetting("trustRemaining", Math.max(0, trustRemaining - 1));
 }
 
 /** "Fill again in Chrome": a job that needs Sherif goes back to the queue for a fresh fill. */

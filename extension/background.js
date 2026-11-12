@@ -11,6 +11,20 @@ const get = (keys) => chrome.storage.local.get(keys);
 const set = (obj) => chrome.storage.local.set(obj);
 const rand = ([a, b]) => a + Math.random() * (b - a);
 
+/**
+ * Chrome stops an idle service worker after 30 seconds, and a pending setTimeout doesn't count as activity.
+ * Long waits are cut into short slices with an extension API call between them, which resets the idle timer.
+ */
+async function wait(ms) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    await new Promise((r) => setTimeout(r, Math.min(10_000, end - Date.now())));
+    await chrome.storage.local.get("token");
+  }
+}
+
+let ticking = false;
+
 async function api(path, { method = "GET", body } = {}) {
   const { token } = await get("token");
   if (!token) throw new Error("No token: paste it in the extension options");
@@ -49,10 +63,23 @@ async function openNeedsYouTabs() {
 }
 
 async function tick() {
+  if (ticking) return; // "Check now" and the alarm must not both lease a job
+  ticking = true;
+  try { await tickOnce(); } finally { ticking = false; }
+}
+
+async function tickOnce() {
   const s = await get(["paused", "active", "nextAt", "token"]);
   if (s.paused || !s.token) return;
   if (s.active) {
-    if (s.active.kind === "collect") { if (Date.now() - s.active.startedAt > 30 * 60_000) await set({ active: null }); return; }
+    if (s.active.kind === "collect") {
+      // A collection pass whose worker was stopped mid-way: clean up its tab and carry on.
+      if (Date.now() - s.active.startedAt > 15 * 60_000) {
+        if (s.active.tabId != null) { await releaseFocus(s.active.tabId); try { await chrome.tabs.remove(s.active.tabId); } catch { /* gone */ } }
+        await set({ active: null });
+      }
+      return;
+    }
     if (Date.now() - s.active.startedAt > JOB_TIMEOUT_MS) await finish(s.active.jobId, { outcome: "failed", reason: "Timed out in the browser" }, false);
     return;
   }
@@ -74,12 +101,14 @@ async function tick() {
   if (next.idle) { await set({ status: `Idle: ${next.idle}` }); return; }
   if (!ADAPTERS[next.site]) { await set({ status: `No adapter for ${next.site}` }); return; }
 
-  const tab = await chrome.tabs.create({ url: formUrl(next.url, next.site), active: false });
-  await emulateFocus(tab.id);
+  // Record the job before the page loads, so the first "complete" event always finds it.
+  const tab = await chrome.tabs.create({ url: "about:blank", active: false });
   await set({
     active: { jobId: next.jobId, site: next.site, mode: next.mode, tabId: tab.id, pacing: next.pacing, phase: "fill", startedAt: Date.now() },
     status: `Working on job #${next.jobId}`,
   });
+  await emulateFocus(tab.id);
+  await chrome.tabs.update(tab.id, { url: formUrl(next.url, next.site) });
 }
 
 /**
@@ -108,7 +137,9 @@ async function inject(tabId, site) {
 chrome.tabs.onUpdated.addListener(async (tabId, info) => {
   if (info.status !== "complete") return;
   const { active } = await get("active");
-  if (!active || active.tabId !== tabId) return;
+  if (!active || active.tabId !== tabId || active.kind === "collect") return;
+  const t = await chrome.tabs.get(tabId).catch(() => null);
+  if (!t || t.url === "about:blank") return;
   if (active.phase === "confirm" || !active.injected) {
     try {
       await inject(tabId, active.site);
@@ -135,12 +166,14 @@ function waitComplete(tabId, ms = 30_000) {
 
 /** One collection pass: each search in the same background tab, cards read at human pace, saved to the app. */
 async function collectLinkedIn(searches, perSearch) {
-  await set({ active: { kind: "collect", startedAt: Date.now() }, status: "Collecting LinkedIn jobs" });
+  await set({ active: { kind: "collect", startedAt: Date.now(), tabId: null }, status: "Collecting LinkedIn jobs" });
   let tabId = null, total = 0;
   try {
     for (const [i, url] of searches.entries()) {
-      if (tabId == null) tabId = (await chrome.tabs.create({ url, active: false })).id;
-      else await chrome.tabs.update(tabId, { url });
+      if (tabId == null) {
+        tabId = (await chrome.tabs.create({ url, active: false })).id;
+        await set({ active: { kind: "collect", startedAt: Date.now(), tabId } });
+      } else await chrome.tabs.update(tabId, { url });
       await waitComplete(tabId);
       await emulateFocus(tabId);
       await chrome.scripting.executeScript({ target: { tabId }, files: ["content/common.js", "content/linkedin-collect.js"] });
@@ -153,7 +186,7 @@ async function collectLinkedIn(searches, perSearch) {
       const last = i === searches.length - 1;
       await api("/api/ext/listings", { method: "POST", body: { jobs: r?.jobs || [], done: last } });
       total += (r?.jobs || []).length;
-      await new Promise((ok) => setTimeout(ok, 20_000 + Math.random() * 40_000));
+      if (!last) await wait(20_000 + Math.random() * 40_000);
     }
   } catch (e) {
     await set({ status: `Collection error: ${e.message || e}` });
@@ -170,6 +203,11 @@ async function finish(jobId, report, keepOpen, tabGone = false) {
   const { active, needsYouTabs = [] } = await get(["active", "needsYouTabs"]);
   if (!active || active.jobId !== jobId) return; // already finished (e.g. confirmed by both scripts)
   await set({ active: null });
+  // After the submit click the application may already be sent: never let it go back to the queue.
+  if (active.phase === "confirm" && report.outcome === "failed") {
+    report = { outcome: "needs_you", reason: `Submitted? check the tab (${report.reason || "no confirmation"})` };
+    keepOpen = true;
+  }
   await releaseFocus(active.tabId);
   try { await api("/api/ext/report", { method: "POST", body: { jobId, ...report } }); }
   catch (e) { await set({ status: `Report failed: ${e.message || e}` }); }
@@ -192,7 +230,10 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
         return reply({ name, base64: toBase64(await res.arrayBuffer()) });
       }
       case "submitting": // the page may navigate away; re-inject on the next load to look for the confirmation
-        if (active && active.jobId === msg.jobId) await set({ active: { ...active, phase: "confirm" } });
+        if (active && active.jobId === msg.jobId) {
+          await set({ active: { ...active, phase: "confirm" } });
+          await api("/api/ext/report", { method: "POST", body: { jobId: msg.jobId, outcome: "submitting" } });
+        }
         return reply({ ok: true });
       case "done": await finish(msg.jobId, msg.report, !!msg.keepOpen); return reply({ ok: true });
       default: return reply({ error: "unknown message" });

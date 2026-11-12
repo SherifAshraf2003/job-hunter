@@ -77,3 +77,19 @@ test("profile facts", () => {
   expect(classify(field("Why do you want to work at Acme?", { kind: "textarea" }))).toBe("why_us");
   expect(classify(field("Phone"))).toBe("phone");
 });
+
+test("combined authorization + sponsorship wording is answered as work authorization", () => {
+  const yn = { kind: "radio" as const, options: ["Yes", "No"] };
+  const q = "Are you legally authorized to work in the United States without the need for visa sponsorship?";
+  expect(val(answerByRule(field(q, yn), ctx({ country: "US", remotePolicy: "remote" }, "remote_from_egypt")))).toBe("No");
+  expect(val(answerByRule(field(q), ctx({ country: "US", remotePolicy: "onsite" }, "sponsors")))).toBe("No");
+});
+
+test("skill-specific years and current salary are not answered by rule", () => {
+  const usd = { salaryMin: 100000, salaryMax: 120000, salaryCurrency: "USD", salaryPeriod: "year" as const };
+  expect(answerByRule(field("How many years of experience do you have with Kubernetes?"), ctx({}))).toBeNull();
+  expect(answerByRule(field("Years of experience with React"), ctx({}))).toBeNull();
+  expect(answerByRule(field("What is your current salary?"), ctx(usd))).toBeNull();
+  expect(answerByRule(field("Current compensation"), ctx(usd))).toBeNull();
+  expect(val(answerByRule(field("Years of professional experience", { kind: "number" }), ctx({})))).toBe(String(profile.facts.yearsExperience));
+});
