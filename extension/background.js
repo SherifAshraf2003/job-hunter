@@ -36,6 +36,7 @@ function formUrl(url, site) {
   const u = url.replace(/[?#].*$/, "").replace(/\/+$/, "");
   if (site === "lever" && !/\/apply$/.test(u)) return u + "/apply";
   if (site === "ashby" && !/\/application$/.test(u)) return u + "/application";
+  if (site === "workable" && /\/j\/[^/]+$/.test(u)) return u + "/apply/";
   return url;
 }
 
