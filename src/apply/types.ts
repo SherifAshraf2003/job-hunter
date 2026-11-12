@@ -18,4 +18,5 @@ export type Fill = { id: string; label: string; value: string | string[] | boole
 export type FillPlan = { fills: Fill[]; action: "submit" | "stop"; status: "applied_pending" | "ready_to_submit" | "needs_you"; reason: string | null };
 
 export type ReportOutcome = "applied" | "stopped" | "needs_you" | "closed" | "failed" | "captcha" | "blocked" | "login_wall";
-export type Report = { outcome: ReportOutcome; reason?: string; url?: string };
+/** For "stopped", `status` echoes the fill plan's status (ready_to_submit or needs_you). */
+export type Report = { outcome: ReportOutcome; reason?: string | null; url?: string; status?: "ready_to_submit" | "needs_you" };
