@@ -13,7 +13,9 @@ JF.adapter = {
   confirmed() { return false; },
 
   async run({ jobId, pacing }) {
-    const applyBtn = await JF.waitFor(() => document.querySelector(".jobs-apply-button, button[aria-label*='Easy Apply'], button[aria-label^='Apply']"), 15_000);
+    // Current LinkedIn markup has obfuscated class names: find the apply control by its text or label.
+    const isApply = (b) => JF.visible(b) && /^(easy )?apply\b|apply on company website/i.test(`${(b.innerText || "").trim()} ${b.getAttribute("aria-label") || ""}`.trim());
+    const applyBtn = await JF.waitFor(() => document.querySelector(".jobs-apply-button") || [...document.querySelectorAll("button, a")].find(isApply), 15_000);
     if (!applyBtn) return JF.done(jobId, { outcome: "needs_you", reason: "No apply button found on LinkedIn" }, true);
     if (!/easy apply/i.test(applyBtn.innerText + applyBtn.getAttribute("aria-label"))) {
       return JF.done(jobId, { outcome: "needs_you", reason: "Applies on company site: open it from LinkedIn" }, true);

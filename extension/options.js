@@ -5,7 +5,7 @@ async function render() {
   $("token").placeholder = s.token ? "Saved (paste to replace)" : "Paste token";
   $("pause").textContent = s.paused ? "Resume" : "Pause";
   $("pause").classList.toggle("on", !!s.paused);
-  $("status").textContent = [s.paused ? "Paused." : "", s.active ? `Working on job #${s.active.jobId} (${s.active.site}, ${s.active.mode})` : "", s.status || ""].filter(Boolean).join("\n");
+  $("status").textContent = [s.paused ? "Paused." : "", s.active ? (s.active.kind === "collect" ? "" : `Working on job #${s.active.jobId} (${s.active.site}, ${s.active.mode === "submit" ? "submitting" : "filling"})`) : "", s.status || ""].filter(Boolean).join("\n");
 }
 
 $("save").onclick = async () => {
