@@ -6,7 +6,7 @@ import type { Report, Site } from "./types";
 
 const MAX_ATTEMPTS = 3;
 
-async function pauseSite(site: Site, reason: string, now: Date) {
+export async function pauseSite(site: Site, reason: string, now: Date) {
   await db.insert(sites).values({ site, autoSubmit: site !== "linkedin", paused: true, pauseReason: reason, pausedAt: now })
     .onConflictDoUpdate({ target: sites.site, set: { paused: true, pauseReason: reason, pausedAt: now } });
 }

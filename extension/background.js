@@ -52,6 +52,7 @@ async function tick() {
   const s = await get(["paused", "active", "nextAt", "token"]);
   if (s.paused || !s.token) return;
   if (s.active) {
+    if (s.active.kind === "collect") { if (Date.now() - s.active.startedAt > 30 * 60_000) await set({ active: null }); return; }
     if (Date.now() - s.active.startedAt > JOB_TIMEOUT_MS) await finish(s.active.jobId, { outcome: "failed", reason: "Timed out in the browser" }, false);
     return;
   }
@@ -60,6 +61,12 @@ async function tick() {
   chrome.action.setBadgeText({ text: waiting.length ? String(waiting.length) : "" });
   chrome.action.setBadgeBackgroundColor({ color: "#F5B544" });
   if (waiting.length >= MAX_NEEDS_YOU_TABS) { await set({ status: `Waiting: ${waiting.length} tabs need you. Finish or close some.` }); return; }
+
+  // LinkedIn collection runs between applications, when it's due.
+  try {
+    const c = await (await api("/api/ext/collect")).json();
+    if (c.due) { await collectLinkedIn(c.searches, c.perSearch); return; }
+  } catch (e) { await set({ status: String(e.message || e) }); return; }
 
   let next;
   try { next = await (await api("/api/ext/next")).json(); }
@@ -117,6 +124,46 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
   const { active } = await get("active");
   if (active && active.tabId === tabId) await finish(active.jobId, { outcome: "failed", reason: "Tab was closed" }, false, true);
 });
+
+function waitComplete(tabId, ms = 30_000) {
+  return new Promise((resolve) => {
+    const t = setTimeout(() => { chrome.tabs.onUpdated.removeListener(l); resolve(false); }, ms);
+    const l = (id, info) => { if (id === tabId && info.status === "complete") { clearTimeout(t); chrome.tabs.onUpdated.removeListener(l); resolve(true); } };
+    chrome.tabs.onUpdated.addListener(l);
+  });
+}
+
+/** One collection pass: each search in the same background tab, cards read at human pace, saved to the app. */
+async function collectLinkedIn(searches, perSearch) {
+  await set({ active: { kind: "collect", startedAt: Date.now() }, status: "Collecting LinkedIn jobs" });
+  let tabId = null, total = 0;
+  try {
+    for (const [i, url] of searches.entries()) {
+      if (tabId == null) tabId = (await chrome.tabs.create({ url, active: false })).id;
+      else await chrome.tabs.update(tabId, { url });
+      await waitComplete(tabId);
+      await emulateFocus(tabId);
+      await chrome.scripting.executeScript({ target: { tabId }, files: ["content/common.js", "content/linkedin-collect.js"] });
+      const r = await chrome.tabs.sendMessage(tabId, { type: "collect", limit: perSearch });
+      if (r?.blocked) {
+        await api("/api/ext/listings", { method: "POST", body: { jobs: [], done: true, blocked: r.blocked } });
+        await set({ status: `LinkedIn showed a ${r.blocked === "login_wall" ? "login wall" : "security check"}: LinkedIn paused` });
+        break;
+      }
+      const last = i === searches.length - 1;
+      await api("/api/ext/listings", { method: "POST", body: { jobs: r?.jobs || [], done: last } });
+      total += (r?.jobs || []).length;
+      await new Promise((ok) => setTimeout(ok, 20_000 + Math.random() * 40_000));
+    }
+  } catch (e) {
+    await set({ status: `Collection error: ${e.message || e}` });
+  } finally {
+    // Mark the pass done even after an error, so a broken page isn't retried every minute.
+    try { await api("/api/ext/listings", { method: "POST", body: { jobs: [], done: true } }); } catch { /* app down */ }
+    if (tabId != null) { await releaseFocus(tabId); try { await chrome.tabs.remove(tabId); } catch { /* gone */ } }
+    await set({ active: null, status: `Collected ${total} LinkedIn jobs` });
+  }
+}
 
 /** Reports the outcome, closes the tab unless Sherif needs it, and schedules the next job at human pace. */
 async function finish(jobId, report, keepOpen, tabGone = false) {

@@ -256,6 +256,7 @@ if (!globalThis.JF) {
   });
 
   const done = (jobId, report, keepOpen) => send({ type: "done", jobId, report, keepOpen });
+  JF.done = done;
 
   async function confirmLoop(jobId) {
     for (let i = 0; i < 40; i++) {
@@ -273,6 +274,7 @@ if (!globalThis.JF) {
       await sleep(1500);
       if (a.blocked?.()) return done(jobId, { outcome: a.blocked() }, true);
       if (a.isClosed()) return done(jobId, { outcome: "closed" }, false);
+      if (a.run) return await a.run({ jobId, mode, pacing });
       await a.openForm();
       const root = await JF.waitFor(() => a.formRoot(), 15_000);
       if (!root) return done(jobId, { outcome: "needs_you", reason: "Could not find the application form" }, true);
