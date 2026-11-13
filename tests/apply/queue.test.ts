@@ -174,3 +174,13 @@ test("a lease is only taken from a queued row", async () => {
   expect([a, b].filter((r) => "jobId" in r)).toHaveLength(1);
   expect((await status(id)).status).toBe("filling");
 });
+
+test("a queued job re-scored as not possible is never handed out", async () => {
+  const blocked = await mkJob({ score: 95 });
+  const ok = await mkJob({ score: 60 });
+  await queueApplications();
+  await db.update(jobScores).set({ canTake: "not_possible" }).where(eq(jobScores.jobId, blocked));
+  const r = await nextApplication(NOW);
+  expect(r).toMatchObject({ jobId: ok });
+  expect((await status(blocked)).status).toBe("queued");
+});

@@ -99,8 +99,8 @@ export async function nextApplication(now: Date = new Date()): Promise<{ jobId: 
     if (atsToday >= cfg.caps.globalDaily) { reason = "Daily application cap reached"; return true; }
     return false;
   };
-  // Jobs Sherif skipped, and listings that closed, are never handed out.
-  const live = (r: (typeof all)[number]) => r.jobStatus !== "filtered_out" && !r.closedAt && !paused.has(r.a.site);
+  // Jobs Sherif skipped, listings that closed, and jobs re-scored as not takeable are never handed out.
+  const live = (r: (typeof all)[number]) => r.jobStatus !== "filtered_out" && !r.closedAt && !paused.has(r.a.site) && r.s.canTake !== "not_possible";
   const best = (x: (typeof all)[number], y: (typeof all)[number]) => composite(y.s, cfg.weights).score - composite(x.s, cfg.weights).score;
 
   for (const r of all.filter((r) => r.a.status === "ready_to_submit" && r.a.approved && live(r)).sort(best)) {
