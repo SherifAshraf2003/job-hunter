@@ -29,6 +29,13 @@
       "when": 1794412423167,
       "tag": "0003_sturdy_thor",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794489645474,
+      "tag": "0004_elite_skaar",
+      "breakpoints": true
     }
   ]
 }

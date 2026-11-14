@@ -16,7 +16,7 @@ function make(): DB {
 export const db: DB = g.__db ?? (g.__db = make());
 
 export async function resetDb(): Promise<void> {
-  await db.execute(sql`truncate companies, jobs, job_sources, job_scores, spend, settings, profile, runs restart identity cascade`);
+  await db.execute(sql`truncate companies, jobs, job_sources, job_scores, spend, settings, profile, runs, applications, answers, sites, site_events restart identity cascade`);
 }
 
 export async function closeDb(): Promise<void> {

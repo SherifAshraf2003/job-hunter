@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Job Finder</title>
+<style>
+  body { font: 13px/1.5 -apple-system, system-ui, sans-serif; background: #14161B; color: #E8EAF0; margin: 0; padding: 16px; width: 320px; }
+  h1 { font-size: 15px; margin: 0 0 12px; }
+  label { display: block; color: #8C93A3; margin: 10px 0 4px; }
+  input[type=password] { width: 100%; box-sizing: border-box; background: #242833; color: #E8EAF0; border: 1px solid #2B303B; border-radius: 6px; padding: 6px 8px; }
+  button { background: #242833; color: #E8EAF0; border: 1px solid #2B303B; border-radius: 6px; padding: 6px 10px; cursor: pointer; margin-top: 8px; }
+  button.on { border-color: #F5B544; color: #F5B544; }
+  #status { margin-top: 12px; color: #8C93A3; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+  <h1>Job Finder Apply</h1>
+  <label for="token">Extension token (from the dashboard: Sites &amp; caps)</label>
+  <input id="token" type="password" autocomplete="off">
+  <button id="save">Save token</button>
+  <button id="pause">Pause</button>
+  <button id="now">Check for a job now</button>
+  <div id="status"></div>
+  <script src="options.js"></script>
+</body>
+</html>

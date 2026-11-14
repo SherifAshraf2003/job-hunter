@@ -56,13 +56,13 @@ const questions = {
     ],
   ),
   canTake: choice(
-    "Can the candidate (`candidate.citizenship`: Egyptian citizen living in Egypt) actually take this job (`job`)?",
+    "Can the candidate (`candidate.citizenship`: Egyptian citizen living in Egypt, willing to relocate per `candidate.relocation`) actually take this job (`job`)?",
     {
       in_egypt: "The job is located in Egypt (on-site or hybrid in Egypt), so no visa is needed",
       remote_from_egypt: "The job is remote and open to people working from Egypt (worldwide, EMEA, Africa/MENA, or no location restriction)",
-      sponsors: "The job is outside Egypt and the listing says they sponsor visas or relocate people",
+      sponsors: "The job is outside Egypt and he can get there: on-site or hybrid in a Gulf (GCC) country or an EU country and the listing does not rule out visa sponsorship, or anywhere else (including the UK, which is not in the EU) only where the listing explicitly says they sponsor visas or relocate people",
       unclear: "Not enough information to tell whether someone in Egypt can take it",
-      not_possible: "Restricted to a region excluding Egypt (e.g. US-only remote, must already have work authorization, or explicitly no sponsorship)",
+      not_possible: "Restricted to a region excluding Egypt and not a Gulf or EU relocation he can make (e.g. US-only remote, on-site in the US or UK unless the listing explicitly offers sponsorship, must already have work authorization, or explicitly no sponsorship)",
     },
   ),
 } as const;

@@ -88,7 +88,7 @@ export async function generateExtras(job: JobRow, profile: BaseProfile, t: Treat
     ` "gapReport": [{"requirement": string, "importance": "core"|"nice", "suggestion": string}],   // up to 6 requirements the job asks for that the resume doesn't show. For "core" ones, suggest a concrete 1-2 day side project that would make it true; for "nice" ones, a one-line way to address it.`,
     ` "prep": {"questions": [{"question": string, "why": string}], "companyNotes": string[]},       // up to 6 interview questions likely from what his resume emphasizes for this job, and up to 3 short notes about the company taken from the listing (stage, product, team)`,
   );
-  if (want.coverLetter) fields.push(` "coverLetter": string  // under 220 words, specific to this job, plain and direct, only real facts`);
+  if (want.coverLetter) fields.push(` "coverLetter": string  // under 220 words, specific to this job, plain and direct, only real facts, signed "${profile.name}"`);
   if (!fields.length) return { gapReport: null, prep: null, coverLetter: null };
   const out = await chatJSON<{ gapReport?: GapItem[]; prep?: Prep; coverLetter?: string | null }>({
     model: t.extrasModel, category: "tailoring", estimateUsd: 0.003,
@@ -104,8 +104,14 @@ Return JSON:
   return {
     gapReport: want.insights ? gap : null,
     prep: want.insights ? { questions: q.map((x) => ({ question: x.question, why: String(x.why ?? "") })), companyNotes: notes } : null,
-    coverLetter: want.coverLetter && typeof out.coverLetter === "string" && out.coverLetter.trim() ? out.coverLetter.trim() : null,
+    coverLetter: want.coverLetter && typeof out.coverLetter === "string" && out.coverLetter.trim() ? signCoverLetter(out.coverLetter.trim(), profile.name) : null,
   };
+}
+
+/** Models often sign with "[Your Name]": put his real name there, or add it when there's no signature. */
+export function signCoverLetter(text: string, name: string): string {
+  const signed = text.replace(/\[(your |full |candidate'?s? )?name\]/gi, name);
+  return signed.includes(name) ? signed : `${signed.trimEnd()}\n\n${name}`;
 }
 
 /** Spec: cover letters only when the listing asks for one. */

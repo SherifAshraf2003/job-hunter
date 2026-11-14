@@ -119,3 +119,53 @@ export const tailorings = pgTable("tailorings", {
   usd: numeric("usd", { mode: "number" }).notNull().default(0),
   createdAt: ts("created_at").notNull().defaultNow(),
 }, (t) => [index("tailorings_created").on(t.createdAt)]);
+
+export const appStatusEnum = pgEnum("app_status", [
+  "queued", "filling", "ready_to_submit", "needs_you", "submitting", "applied", "skipped", "failed", "manual", "interviewing", "rejected", "offer",
+]);
+export const siteEnum = pgEnum("site", ["greenhouse", "lever", "ashby", "workable", "linkedin", "other"]);
+export const answerSourceEnum = pgEnum("answer_source", ["seed", "drafted", "edited"]);
+export const siteEventEnum = pgEnum("site_event", ["captcha", "blocked", "login_wall", "warning"]);
+
+export const applications = pgTable("applications", {
+  jobId: integer("job_id").primaryKey().references(() => jobs.id, { onDelete: "cascade" }),
+  status: appStatusEnum("status").notNull().default("queued"),
+  site: siteEnum("site").notNull(),
+  boardKey: text("board_key").notNull(),
+  targetUrl: text("target_url").notNull(),
+  reason: text("reason"),
+  fills: jsonb("fills"),
+  approved: boolean("approved").notNull().default(false),
+  leaseAt: ts("lease_at"),
+  filledAt: ts("filled_at"),
+  appliedAt: ts("applied_at"),
+  queuedAt: ts("queued_at").notNull().defaultNow(),
+  attempts: integer("attempts").notNull().default(0),
+}, (t) => [index("applications_status").on(t.status)]);
+
+export const answers = pgTable("answers", {
+  id: serial("id").primaryKey(),
+  key: text("key").notNull().unique(),
+  question: text("question").notNull(),
+  answer: text("answer").notNull(),
+  source: answerSourceEnum("source").notNull(),
+  isNew: boolean("is_new").notNull().default(false),
+  updatedAt: ts("updated_at").notNull().defaultNow(),
+});
+
+export const sites = pgTable("sites", {
+  site: siteEnum("site").primaryKey(),
+  autoSubmit: boolean("auto_submit").notNull().default(true),
+  dailyCap: integer("daily_cap"),
+  paused: boolean("paused").notNull().default(false),
+  pauseReason: text("pause_reason"),
+  pausedAt: ts("paused_at"),
+});
+
+export const siteEvents = pgTable("site_events", {
+  id: serial("id").primaryKey(),
+  site: siteEnum("site").notNull(),
+  kind: siteEventEnum("kind").notNull(),
+  at: ts("at").notNull().defaultNow(),
+  jobId: integer("job_id"),
+}, (t) => [index("site_events_site_at").on(t.site, t.at)]);

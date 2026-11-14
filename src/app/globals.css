@@ -137,3 +137,5 @@ pre.plain { white-space: pre-wrap; font: 13px/1.55 var(--f); color: var(--ink); 
 .pill { font-size: 11px; border-radius: 4px; padding: 2px 6px; align-self: start; white-space: nowrap; }
 .pill.hi { background: color-mix(in srgb, var(--bad) 15%, transparent); color: var(--bad); }
 .pill.lo { background: var(--sunk); color: var(--muted); }
+.qa textarea { width: 100%; box-sizing: border-box; background: var(--sunk); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; margin: 6px 0; resize: vertical; }
+.panel .field form { margin: 0; }

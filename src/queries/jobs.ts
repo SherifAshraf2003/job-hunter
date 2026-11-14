@@ -1,14 +1,21 @@
 import { and, eq, inArray, isNull, isNotNull, sql, desc, type SQL } from "drizzle-orm";
 import { db } from "../db/client";
-import { jobs, jobScores, jobSources, runs, tailorings } from "../db/schema";
+import { applications, jobs, jobScores, jobSources, runs, tailorings } from "../db/schema";
 import { composite } from "../scoring/composite";
 import type { Weights } from "../config";
 
 export type JobFilters = {
-  stage?: "found" | "scored" | "tailored" | "filtered_out" | "score_failed";
+  stage?: "found" | "scored" | "tailored" | "filtered_out" | "score_failed" | AppStage;
   canTake?: boolean; salaryPosted?: boolean; minScore?: number;
   ai?: boolean; founding?: boolean; remote?: boolean; source?: string; includeClosed?: boolean;
 };
+
+/** Pipeline stages backed by the applications table, and the statuses each one shows. */
+export const APP_STAGES = {
+  ready: ["ready_to_submit"], needs_you: ["needs_you"], applied: ["applied", "rejected", "offer"],
+  interviewing: ["interviewing"], manual: ["manual"],
+} as const;
+export type AppStage = keyof typeof APP_STAGES;
 
 export type RankedJob = typeof jobs.$inferSelect & {
   scores: typeof jobScores.$inferSelect | null;
@@ -21,11 +28,16 @@ const AI_RE = "\\m(ai|ml|llm|machine learning)\\M";
 
 function where(f: JobFilters): SQL | undefined {
   const c: SQL[] = [];
-  if (!f.includeClosed) c.push(isNull(jobs.closedAt));
-  if (f.stage === "tailored") {
+  // Applied and interviewing jobs stay listed after the posting closes.
+  const keepClosed = f.includeClosed || f.stage === "applied" || f.stage === "interviewing";
+  if (!keepClosed) c.push(isNull(jobs.closedAt));
+  if (f.stage && f.stage in APP_STAGES) {
+    const st = APP_STAGES[f.stage as AppStage].map((x) => `'${x}'`).join(",");
+    c.push(sql`exists (select 1 from applications a where a.job_id = ${jobs.id} and a.status in (${sql.raw(st)}))`);
+  } else if (f.stage === "tailored") {
     c.push(eq(jobs.status, "scored"));
     c.push(sql`exists (select 1 from tailorings t where t.job_id = ${jobs.id})`);
-  } else c.push(eq(jobs.status, f.stage ?? "scored"));
+  } else c.push(eq(jobs.status, (f.stage ?? "scored") as "found" | "scored" | "filtered_out" | "score_failed"));
   if (f.salaryPosted) c.push(isNotNull(jobs.salaryMin));
   if (f.remote) c.push(eq(jobs.remotePolicy, "remote"));
   if (f.founding) c.push(sql`${jobs.title} ~* 'founding'`);
@@ -72,7 +84,27 @@ export async function stageCounts() {
   const rows = await db.select({ status: jobs.status, n: sql<number>`count(*)::int` }).from(jobs).where(isNull(jobs.closedAt)).groupBy(jobs.status);
   const get = (s: string) => rows.find((r) => r.status === s)?.n ?? 0;
   const [t] = await db.select({ n: sql<number>`count(*)::int` }).from(tailorings).innerJoin(jobs, eq(jobs.id, tailorings.jobId)).where(isNull(jobs.closedAt));
-  return { found: get("found"), scored: get("scored"), tailored: t?.n ?? 0, filteredOut: get("filtered_out"), failed: get("score_failed") };
+  const apps = await db.select({ status: applications.status, n: sql<number>`count(*)::int` }).from(applications).groupBy(applications.status);
+  const app = (k: AppStage) => apps.filter((r) => (APP_STAGES[k] as readonly string[]).includes(r.status)).reduce((a, r) => a + r.n, 0);
+  return {
+    found: get("found"), scored: get("scored"), tailored: t?.n ?? 0, filteredOut: get("filtered_out"), failed: get("score_failed"),
+    ready: app("ready"), needsYou: app("needs_you"), applied: app("applied"), interviewing: app("interviewing"), manual: app("manual"),
+  };
+}
+
+export async function getApplication(jobId: number) {
+  const [a] = await db.select().from(applications).where(eq(applications.jobId, jobId));
+  return a ?? null;
+}
+
+/** Applications sent today (ATS submits) and LinkedIn forms filled today, for the header caps. */
+export async function todayCounts(now = new Date()): Promise<{ applied: number; linkedin: number }> {
+  const d0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+  const [r] = await db.select({
+    applied: sql<number>`count(*) filter (where ${applications.appliedAt} >= ${d0}::timestamptz and ${applications.site} <> 'linkedin')::int`,
+    linkedin: sql<number>`count(*) filter (where ${applications.filledAt} >= ${d0}::timestamptz and ${applications.site} = 'linkedin')::int`,
+  }).from(applications);
+  return { applied: r?.applied ?? 0, linkedin: r?.linkedin ?? 0 };
 }
 
 export async function latestRun() {
