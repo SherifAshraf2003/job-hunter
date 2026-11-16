@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Weights } from "@/config";
-import type { RankedJob } from "@/queries/jobs";
+import type { AppJob, RankedJob } from "@/queries/jobs";
 
 export const DIMS = [
   { key: "scope", label: "Role scope", color: "var(--q1)" },
@@ -56,6 +56,43 @@ export function JobRow({ j, i, w, href, current }: { j: RankedJob; i: number; w:
         {feas && <div className={`feas ${feas[1]}`}>{feas[0]}</div>}
       </div>
       <div className="src">{[...new Set(j.sources.map((s) => s.source))].join(", ")}</div>
+    </Link>
+  );
+}
+
+type App = AppJob["app"];
+/** What an application's state means for Sherif, in his words. "act" means it's waiting on him. */
+export function appStatus(a: App): { label: string; tone: "act" | "work" | "good" | "bad" | "muted" } {
+  switch (a.status) {
+    case "ready_to_submit": return a.approved ? { label: "Approved, sending next", tone: "work" } : { label: "Approve to send", tone: "act" };
+    case "needs_you": return { label: "Finish it in Chrome", tone: "act" };
+    case "manual": return { label: "Apply yourself", tone: "act" };
+    case "failed": return { label: "Failed", tone: "bad" };
+    case "queued": return { label: a.picked ? "Your pick, next in line" : "In line for Chrome", tone: "work" };
+    case "filling": return { label: "Chrome is filling it", tone: "work" };
+    case "submitting": return { label: "Sending", tone: "work" };
+    case "interviewing": return { label: "Interviewing", tone: "good" };
+    case "offer": return { label: "Offer", tone: "good" };
+    case "rejected": return { label: "Rejected", tone: "muted" };
+    case "applied": return { label: a.appliedAt ? `Applied ${a.appliedAt.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}` : "Applied", tone: "work" };
+    default: return { label: a.status.replace(/_/g, " "), tone: "muted" };
+  }
+}
+
+export function AppRow({ j, href, current }: { j: AppJob; href: string; current: boolean }) {
+  const st = appStatus(j.app);
+  return (
+    <Link className="row app-row" href={href} aria-current={current} scroll={false}>
+      <span className={`status ${st.tone}`} aria-hidden />
+      <div style={{ minWidth: 0 }}>
+        <div className="title">{j.title}</div>
+        <div className="co">{j.companyName}{j.location ? `, ${j.location}` : ""}</div>
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <div className={`badge ${st.tone}`}>{st.label}</div>
+        {j.app.reason && !["applied", "interviewing", "offer", "rejected"].includes(j.app.status) && <div className="reason">{j.app.reason}</div>}
+      </div>
+      <div className="scorewrap"><span className="score">{j.composite ?? "–"}</span></div>
     </Link>
   );
 }

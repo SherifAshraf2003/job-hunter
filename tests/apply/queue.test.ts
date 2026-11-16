@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db, resetDb, closeDb } from "@/db/client";
 import { applications, jobs, jobScores, sites, tailorings } from "@/db/schema";
 import { saveSetting, loadSettings } from "@/config";
-import { queueApplications, nextApplication, approve } from "@/apply/queue";
+import { queueApplications, nextApplication, approve, pickJob } from "@/apply/queue";
 
 beforeEach(async () => { await resetDb(); });
 afterAll(async () => { await closeDb(); });
@@ -183,4 +183,35 @@ test("a queued job re-scored as not possible is never handed out", async () => {
   const r = await nextApplication(NOW);
   expect(r).toMatchObject({ jobId: ok });
   expect((await status(blocked)).status).toBe("queued");
+});
+
+test("queueApplications with jobIds queues only those jobs", async () => {
+  const a = await mkJob({ score: 70 });
+  const b = await mkJob({ score: 80 });
+  expect(await queueApplications({ jobIds: [a] })).toEqual({ queued: 1, manual: 0 });
+  expect((await status(a)).status).toBe("queued");
+  expect(await status(b)).toBeUndefined();
+});
+
+test("a job Sherif picked is handed out before higher-scored ones", async () => {
+  const picked = await mkJob({ score: 50 });
+  const high = await mkJob({ score: 95 });
+  await queueApplications({ jobIds: [picked], picked: true });
+  await queueApplications();
+  expect((await status(picked)).picked).toBe(true);
+  expect((await status(high)).picked).toBe(false);
+  expect(await nextApplication(NOW)).toMatchObject({ jobId: picked });
+});
+
+test("pickJob queues an already tailored job as Sherif's pick", async () => {
+  const id = await mkJob({ score: 40 });
+  expect(await pickJob(id)).toEqual({ ok: true });
+  expect(await status(id)).toMatchObject({ status: "queued", picked: true });
+});
+
+test("pickJob refuses a job he can't take", async () => {
+  const id = await mkJob({ score: 80 });
+  await db.update(jobScores).set({ canTake: "not_possible" }).where(eq(jobScores.jobId, id));
+  expect(await pickJob(id)).toHaveProperty("error");
+  expect(await status(id)).toBeUndefined();
 });

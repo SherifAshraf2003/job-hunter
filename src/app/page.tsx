@@ -4,19 +4,24 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db/client";
 import { jobs } from "@/db/schema";
 import { loadSettings } from "@/config";
-import { listJobs, getJob, stageCounts, latestRun, sourceCount, getTailoring, gapCounts, gapKey, getApplication, todayCounts, type JobFilters } from "@/queries/jobs";
+import { listJobs, listApplications, tabCounts, getJob, stageCounts, latestRun, sourceCount, getTailoring, gapCounts, gapKey, getApplication, todayCounts, type JobFilters } from "@/queries/jobs";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { tailorings, applications, sites, answers } from "@/db/schema";
-import { approve, refill } from "@/apply/queue";
+import { approve, refill, pickJob } from "@/apply/queue";
+import { redirect } from "next/navigation";
 import type { Fill } from "@/apply/types";
 import { CopyButton } from "./components/CopyButton";
 import type { DiffRow } from "@/tailor/diff";
 import type { GapItem, Prep, TruthIssue } from "@/tailor/types";
 import { spendSummary } from "@/budget/budget";
-import { DIMS, FEAS_LABEL, JobRow, salaryText } from "./components/ui";
+import { AppRow, DIMS, FEAS_LABEL, JobRow, appStatus, salaryText } from "./components/ui";
+import { ApplyButton } from "./components/ApplyButton";
 import { RunNow } from "./components/RunNow";
 import { generateExtras } from "@/tailor/generate";
+import { matchTerms } from "@/tailor/keywords";
+import { baseResume } from "@/tailor/truth";
+import type { TailoredResume } from "@/tailor/types";
 import { pickTreatment } from "@/tailor/tiers";
 import { loadProfile } from "@/profile/load";
 import { BudgetExceededError } from "@/llm/openrouter";
@@ -26,7 +31,6 @@ export const dynamic = "force-dynamic";
 type SP = Record<string, string | undefined>;
 
 const CHIPS: { key: keyof JobFilters; label: string; value: string }[] = [
-  { key: "canTake", label: "Can take it", value: "1" },
   { key: "salaryPosted", label: "Salary posted", value: "1" },
   { key: "minScore", label: "Score 60+", value: "60" },
   { key: "ai", label: "AI roles", value: "1" },
@@ -96,6 +100,23 @@ async function prepareInsights(formData: FormData) {
   revalidatePath("/");
 }
 
+/** Apply on a job: tailor it if needed, queue it ahead of the app's own picks, then show it in the Apply tab. */
+async function pickAction(formData: FormData) {
+  "use server";
+  const id = Number(formData.get("id"));
+  if (!Number.isInteger(id) || id <= 0) return;
+  const r = await pickJob(id);
+  revalidatePath("/");
+  redirect("error" in r ? `/?view=jobs&job=${id}&err=${encodeURIComponent(r.error)}` : `/?view=apply&job=${id}`);
+}
+
+const VIEWS = [
+  { key: "apply", label: "Apply", hint: "waiting on you or in progress" },
+  { key: "applied", label: "Applied", hint: "sent, track replies" },
+  { key: "jobs", label: "Jobs to look at", hint: "you can take these" },
+] as const;
+type View = (typeof VIEWS)[number]["key"] | "pipeline";
+
 async function approveAction(formData: FormData) {
   "use server";
   const id = Number(formData.get("id"));
@@ -135,18 +156,24 @@ const TABS = [
 export default async function Home({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
   const cfg = await loadSettings();
+  const view: View = (["apply", "applied", "jobs", "pipeline"] as const).find((v) => v === sp.view) ?? "apply";
   const filters: JobFilters = {
-    stage: (sp.stage as JobFilters["stage"]) ?? "scored",
-    canTake: sp.canTake === "1", salaryPosted: sp.salaryPosted === "1", ai: sp.ai === "1",
+    stage: view === "jobs" ? "scored" : (sp.stage as JobFilters["stage"]) ?? "scored",
+    fresh: view === "jobs",
+    canTake: view === "jobs" ? sp.canTake !== "0" : sp.canTake === "1",
+    salaryPosted: sp.salaryPosted === "1", ai: sp.ai === "1",
     founding: sp.founding === "1", remote: sp.remote === "1",
     minScore: sp.minScore ? Number(sp.minScore) : undefined,
   };
-  const [list, counts, run, spend, nSources, today, siteRows, newAnswers] = await Promise.all([
-    listJobs(filters, cfg.weights), stageCounts(), latestRun(), spendSummary(), sourceCount(), todayCounts(),
+  const [list, apps, tabs, counts, run, spend, nSources, today, siteRows, newAnswers] = await Promise.all([
+    view === "jobs" || view === "pipeline" ? listJobs(filters, cfg.weights) : Promise.resolve([]),
+    view === "apply" || view === "applied" ? listApplications(view === "apply" ? "todo" : "sent", cfg.weights) : Promise.resolve([]),
+    tabCounts(), view === "pipeline" ? stageCounts() : Promise.resolve(null), latestRun(), spendSummary(), sourceCount(), todayCounts(),
     db.select().from(sites), db.select({ id: answers.id }).from(answers).where(eq(answers.isNew, true)),
   ]);
   const pausedSites = siteRows.filter((x) => x.paused);
-  const selectedId = sp.job ? Number(sp.job) : list[0]?.id;
+  const rows = view === "apply" || view === "applied" ? apps : list;
+  const selectedId = sp.job ? Number(sp.job) : rows[0]?.id;
   const job = selectedId ? await getJob(selectedId, cfg.weights) : null;
   const tailoring = job ? await getTailoring(job.id) : null;
   const app = job ? await getApplication(job.id) : null;
@@ -158,6 +185,12 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
   const showChanges = sp.changes === "1";
   const running = run?.status === "running";
   const errors = ((run?.stats as { errors?: string[] } | null)?.errors ?? []).length;
+  const waiting = apps.filter((a) => appStatus(a.app).tone === "act").length;
+  const tabCount = { apply: tabs.todo, applied: tabs.sent, jobs: tabs.fresh };
+  // Which of the ad's tech terms the resume shows: the tailored one if there is one, else the base resume.
+  const shown = (r: TailoredResume) => [r.headline, ...r.roles.flatMap((x) => x.bullets.map((b) => b.text)), ...r.projects.map((x) => x.text), ...r.skills.flatMap((c) => c.items)].join("\n");
+  const match = job ? matchTerms(`${job.title}\n${job.descriptionText}`, shown((tailoring?.pdfPath && (tailoring.resume as TailoredResume | null)) || baseResume(await loadProfile()))) : null;
+  const canApply = !!job && !app && job.status === "scored" && !job.closedAt && job.scores?.canTake !== "not_possible";
 
   return (
     <div className="app">
@@ -165,50 +198,101 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
         <Link className="brand" href="/">Job Finder</Link>
         <div className="run">
           <span className={`dot ${running ? "" : "idle"}`} />
-          {running ? "Searching now" : `Last search ${ago(run?.finishedAt)} across ${nSources} sources`}
+          {running ? "Searching now" : `Last search ${ago(run?.finishedAt)}`}
           {errors > 0 && !running ? `, ${errors} source errors` : ""}
         </div>
         <div className="today">
-          <span>Spend today <b>${spend.todayUsd.toFixed(2)}</b></span>
-          <span>This month <b>${spend.monthUsd.toFixed(2)}</b> of ${spend.capUsd}</span>
-          <span>Applied today <b>{today.applied}</b> of {cfg.caps.globalDaily}</span>
-          <span>LinkedIn <b>{today.linkedin}</b> of {siteRows.find((x) => x.site === "linkedin")?.dailyCap ?? cfg.caps.linkedinDaily}</span>
+          {cfg.dryRun && <Link className="pill warn" href="/sites" title="The extension fills forms but never submits. Turn it off under Sites & caps.">Dry run: nothing is sent</Link>}
           {(cfg.globalPause || pausedSites.length > 0) && (
             <Link className="pill hi" href="/sites">{cfg.globalPause ? "Applying paused" : `Paused: ${pausedSites.map((x) => x.site).join(", ")}`}</Link>
           )}
-          <Link className="btn" href="/answers">Answers{newAnswers.length ? ` (${newAnswers.length} new)` : ""}</Link>
-          <Link className="btn" href="/sites">Sites &amp; caps</Link>
+          <span>Sent today <b>{today.applied}</b> of {cfg.caps.globalDaily}</span>
+          {newAnswers.length > 0 && <Link className="btn" href="/answers?new=1">{newAnswers.length} new answers to check</Link>}
           <RunNow />
-          <Link className="btn" href="/settings">Settings</Link>
+          <details className="more">
+            <summary className="btn">More</summary>
+            <div className="menu">
+              <Link href="/answers">Saved answers</Link>
+              <Link href="/sites">Sites &amp; caps</Link>
+              <Link href="/settings">Settings</Link>
+              <Link href="/?view=pipeline">Behind the scenes</Link>
+              <div className="menu-note">
+                Spend today ${spend.todayUsd.toFixed(2)}, this month ${spend.monthUsd.toFixed(2)} of ${spend.capUsd}<br />
+                LinkedIn filled today {today.linkedin} of {siteRows.find((x) => x.site === "linkedin")?.dailyCap ?? cfg.caps.linkedinDaily}<br />
+                Searching {nSources} sources
+              </div>
+            </div>
+          </details>
         </div>
       </header>
 
-      <nav className="stages" aria-label="Pipeline stage">
-        {STAGES.map((s) => (
-          <Link key={s.key} className={`stage ${(s.key === "score_failed" && counts.failed) || (s.key === "needs_you" && counts.needsYou) ? "warn" : ""}`}
-            href={href(sp, { stage: s.key === "scored" ? undefined : s.key, job: undefined })}
-            aria-current={(filters.stage ?? "scored") === s.key}>
-            <span className="n">{counts[s.count]}</span><span className="l">{s.label}</span>
+      <nav className="views" aria-label="Views">
+        {VIEWS.map((v) => (
+          <Link key={v.key} className="view" href={v.key === "apply" ? "/" : `/?view=${v.key}`} aria-current={view === v.key ? "page" : undefined}>
+            <span className="n">{tabCount[v.key]}</span>
+            <span className="l">{v.label}</span>
+            <span className="h">{v.key === "apply" && view === "apply" && waiting ? `${waiting} waiting on you` : v.hint}</span>
           </Link>
         ))}
       </nav>
 
+      {view === "pipeline" && counts && (
+        <>
+          <div className="crumb"><Link href="/">Back to your jobs</Link><span>Behind the scenes: every step the app runs by itself. Use it when something looks wrong.</span></div>
+          <nav className="stages" aria-label="Pipeline stage">
+            {STAGES.map((s) => (
+              <Link key={s.key} className={`stage ${(s.key === "score_failed" && counts.failed) || (s.key === "needs_you" && counts.needsYou) ? "warn" : ""}`}
+                href={href(sp, { stage: s.key === "scored" ? undefined : s.key, job: undefined })}
+                aria-current={(filters.stage ?? "scored") === s.key}>
+                <span className="n">{counts[s.count]}</span><span className="l">{s.label}</span>
+              </Link>
+            ))}
+          </nav>
+        </>
+      )}
+
       <div className="main">
-        <section className="list" aria-label="Ranked jobs">
-          <div className="filters">
-            {CHIPS.map((c) => {
-              const on = sp[c.key] === c.value;
-              return <Link key={c.key} className="chip" aria-pressed={on} scroll={false} href={href(sp, { [c.key]: on ? undefined : c.value, job: undefined })}>{c.label}</Link>;
-            })}
-            <span className="sort">{list.length} jobs, sorted by score</span>
-          </div>
-          <div className="legend">
-            {DIMS.map((d) => <span key={d.key}><i style={{ background: d.color }} />{d.label}</span>)}
-          </div>
-          {list.length === 0 ? (
-            <div className="empty">No jobs match these filters. Turn a filter off, or press Run now to search again.</div>
-          ) : list.map((j, i) => (
-            <JobRow key={j.id} j={j} i={i} w={cfg.weights} href={href(sp, { job: String(j.id) })} current={j.id === job?.id} />
+        <section className="list" aria-label="Jobs">
+          {(view === "jobs" || view === "pipeline") && (
+            <>
+              <div className="filters">
+                {CHIPS.map((c) => {
+                  const on = sp[c.key] === c.value;
+                  return <Link key={c.key} className="chip" aria-pressed={on} scroll={false} href={href(sp, { [c.key]: on ? undefined : c.value, job: undefined })}>{c.label}</Link>;
+                })}
+                {view === "jobs" && (
+                  <Link className="chip" aria-pressed={sp.canTake === "0"} scroll={false} href={href(sp, { canTake: sp.canTake === "0" ? undefined : "0", job: undefined })}>Include ones I can&apos;t take</Link>
+                )}
+                {view === "pipeline" && (
+                  <Link className="chip" aria-pressed={sp.canTake === "1"} scroll={false} href={href(sp, { canTake: sp.canTake === "1" ? undefined : "1", job: undefined })}>Can take it</Link>
+                )}
+                <span className="sort">{list.length === 300 ? "Top 300" : list.length} {list.length === 1 ? "job" : "jobs"}, best first</span>
+              </div>
+              <div className="legend">
+                {DIMS.map((d) => <span key={d.key}><i style={{ background: d.color }} />{d.label}</span>)}
+              </div>
+            </>
+          )}
+          {rows.length === 0 ? (
+            <div className="empty">
+              {view === "apply" ? <>Nothing waiting. Pick a job under <Link href="/?view=jobs">Jobs to look at</Link> and press Apply.</>
+                : view === "applied" ? <>No applications sent yet. Jobs you apply to show up here so you can track replies.</>
+                : "No jobs match these filters. Turn a filter off, or press Run now to search again."}
+            </div>
+          ) : view === "apply" ? (
+            ([["Waiting on you", (t: string) => t === "act" || t === "bad"], ["Chrome is working on these", (t: string) => t === "work"]] as const).map(([title, pick]) => {
+              const group = apps.filter((j) => pick(appStatus(j.app).tone));
+              return group.length ? (
+                <div key={title}>
+                  <div className="group-h">{title}<span>{group.length}</span></div>
+                  {group.map((j) => <AppRow key={j.id} j={j} href={href(sp, { job: String(j.id), err: undefined })} current={j.id === job?.id} />)}
+                </div>
+              ) : null;
+            })
+          ) : view === "applied" ? apps.map((j) => (
+            <AppRow key={j.id} j={j} href={href(sp, { job: String(j.id), err: undefined })} current={j.id === job?.id} />
+          )) : list.map((j, i) => (
+            <JobRow key={j.id} j={j} i={i} w={cfg.weights} href={href(sp, { job: String(j.id), err: undefined })} current={j.id === job?.id} />
           ))}
         </section>
 
@@ -224,6 +308,12 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
                 <div><span>Found on</span>{job.sources.map((s, i) => <span key={i} style={{ display: "inline", color: "inherit", fontSize: 13 }}>{i ? ", " : ""}<a href={s.url} target="_blank" rel="noreferrer">{s.source}</a></span>)}</div>
               </div>
             </div>
+            {match && match.matched.length + match.missing.length > 0 && (
+              <div className="match">
+                <b>{tailoring?.pdfPath ? "Tailored resume" : "Your resume"} shows {match.matched.length} of {match.matched.length + match.missing.length} tech terms in this ad.</b>
+                {match.missing.length > 0 && <> Not on it: {match.missing.join(", ")}. Add one under <Link href="/settings">Extra skills</Link> only if you&apos;ve really used it.</>}
+              </div>
+            )}
             {job.scores ? (
               <div className="why">
                 <h2>Why it ranks here</h2>
@@ -236,6 +326,14 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
                 ))}
               </div>
             ) : job.statusReason ? <div className="note">{job.statusReason}</div> : null}
+            {sp.err && job.id === Number(sp.job) && <div className="note bad">{sp.err}</div>}
+            {canApply && (
+              <form action={pickAction} className="actions apply-cta">
+                <input type="hidden" name="id" value={job.id} />
+                <ApplyButton tailored={!!tailoring?.pdfPath} />
+                <span className="feas">{tailoring?.pdfPath ? "Your tailored resume is ready." : "Tailors your resume first (about $0.10–0.30)."} Chrome fills it next; it goes ahead of the app&apos;s own picks.</span>
+              </form>
+            )}
             {app?.status === "needs_you" && <div className="note"><b>Needs you:</b> {app.reason ?? "Finish this application in Chrome."}</div>}
             {app?.status === "ready_to_submit" && <div className="note">Ready to submit{app.reason ? ` (${app.reason})` : ""}. {cfg.trustRemaining > 0 ? `${cfg.trustRemaining} approvals left in the trust period.` : ""}</div>}
             {app?.status === "failed" && <div className="note">Applying failed: {app.reason}</div>}
@@ -256,11 +354,11 @@ export default async function Home({ searchParams }: { searchParams: Promise<SP>
                     <button className="btn" type="submit" aria-pressed={app.status === st}>{st[0].toUpperCase() + st.slice(1)}</button></form>
                 ))}
                 {app.status === "manual" && <a className="btn primary" href={app.targetUrl} target="_blank" rel="noreferrer">Open listing to apply</a>}
-                <span className="feas" style={{ alignSelf: "center" }}>{app.site}, {app.status.replace(/_/g, " ")}{app.appliedAt ? `, applied ${app.appliedAt.toLocaleDateString()}` : ""}</span>
+                <span className={`badge ${appStatus(app).tone}`} style={{ alignSelf: "center" }}>{appStatus(app).label}</span><span className="feas" style={{ alignSelf: "center" }}>via {app.site}</span>
               </div>
             )}
             <div className="actions">
-              <a className="btn primary" href={job.applyUrl} target="_blank" rel="noreferrer">View listing</a>
+              <a className="btn" href={job.applyUrl} target="_blank" rel="noreferrer">View listing</a>
               {job.status !== "filtered_out" && (
                 <form action={skipJob}><input type="hidden" name="id" value={job.id} /><button className="btn" type="submit">Skip job</button></form>
               )}

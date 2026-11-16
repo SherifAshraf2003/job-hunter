@@ -1,0 +1,1 @@
+ALTER TABLE "applications" ADD COLUMN "picked" boolean DEFAULT false NOT NULL;

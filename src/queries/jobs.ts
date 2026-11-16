@@ -8,6 +8,8 @@ export type JobFilters = {
   stage?: "found" | "scored" | "tailored" | "filtered_out" | "score_failed" | AppStage;
   canTake?: boolean; salaryPosted?: boolean; minScore?: number;
   ai?: boolean; founding?: boolean; remote?: boolean; source?: string; includeClosed?: boolean;
+  /** Only jobs with no application yet: the "Jobs to look at" tab. */
+  fresh?: boolean;
 };
 
 /** Pipeline stages backed by the applications table, and the statuses each one shows. */
@@ -38,6 +40,7 @@ function where(f: JobFilters): SQL | undefined {
     c.push(eq(jobs.status, "scored"));
     c.push(sql`exists (select 1 from tailorings t where t.job_id = ${jobs.id})`);
   } else c.push(eq(jobs.status, (f.stage ?? "scored") as "found" | "scored" | "filtered_out" | "score_failed"));
+  if (f.fresh) c.push(sql`not exists (select 1 from applications a where a.job_id = ${jobs.id})`);
   if (f.salaryPosted) c.push(isNotNull(jobs.salaryMin));
   if (f.remote) c.push(eq(jobs.remotePolicy, "remote"));
   if (f.founding) c.push(sql`${jobs.title} ~* 'founding'`);
@@ -134,3 +137,40 @@ export async function gapCounts(): Promise<Map<string, number>> {
   return m;
 }
 export const gapKey = normReq;
+
+/** The Apply tab: everything still in flight. The Applied tab: everything sent. */
+export const TODO_STATUSES = ["ready_to_submit", "needs_you", "manual", "failed", "queued", "filling", "submitting"] as const;
+export const SENT_STATUSES = ["interviewing", "offer", "applied", "rejected"] as const;
+
+export type AppJob = RankedJob & { app: typeof applications.$inferSelect };
+
+/** Lower comes first: what waits on Sherif (approve, finish, apply yourself, failed), then what the app is still doing. */
+export function todoRank(a: typeof applications.$inferSelect): number {
+  if (a.status === "ready_to_submit") return a.approved ? 4 : 0;
+  return { needs_you: 1, manual: 2, failed: 3 }[a.status as string] ?? 4;
+}
+
+export async function listApplications(group: "todo" | "sent", w: Weights): Promise<AppJob[]> {
+  const statuses = group === "todo" ? TODO_STATUSES : SENT_STATUSES;
+  const rows = await db.select().from(applications).innerJoin(jobs, eq(jobs.id, applications.jobId))
+    .leftJoin(jobScores, eq(jobScores.jobId, jobs.id))
+    .where(and(inArray(applications.status, [...statuses]), group === "todo" ? isNull(jobs.closedAt) : undefined));
+  const ranked = rank(rows, w, new Map()).map((r, i) => ({ ...r, app: rows[i].applications }));
+  const order = (r: AppJob) => (group === "todo" ? todoRank(r.app) : SENT_STATUSES.indexOf(r.app.status as (typeof SENT_STATUSES)[number]));
+  ranked.sort((a, b) => order(a) - order(b) || Number(b.app.picked) - Number(a.app.picked)
+    || (group === "sent" ? +(b.app.appliedAt ?? 0) - +(a.app.appliedAt ?? 0) : 0) || (b.composite ?? -1) - (a.composite ?? -1));
+  const srcs = await attachSources(ranked);
+  return ranked.map((r) => ({ ...r, sources: srcs.get(r.id) ?? [] }));
+}
+
+/** Counts for the three tabs. "fresh" matches the default Jobs to look at list (takeable, open, scored, no application). */
+export async function tabCounts(): Promise<{ todo: number; sent: number; fresh: number }> {
+  const apps = await db.select({ status: applications.status, closed: jobs.closedAt }).from(applications).innerJoin(jobs, eq(jobs.id, applications.jobId));
+  const [f] = await db.select({ n: sql<number>`count(*)::int` }).from(jobs).leftJoin(jobScores, eq(jobScores.jobId, jobs.id))
+    .where(where({ stage: "scored", fresh: true, canTake: true }));
+  return {
+    todo: apps.filter((a) => !a.closed && (TODO_STATUSES as readonly string[]).includes(a.status)).length,
+    sent: apps.filter((a) => (SENT_STATUSES as readonly string[]).includes(a.status)).length,
+    fresh: f?.n ?? 0,
+  };
+}

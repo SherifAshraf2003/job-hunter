@@ -4,6 +4,7 @@ import { applications, jobs, jobScores, jobSources, sites, tailorings } from "..
 import { loadSettings, saveSetting } from "../config";
 import { composite } from "../scoring/composite";
 import { pickApplyTarget } from "./sites";
+import { tailorPending } from "../tailor/tailorJobs";
 import type { Site } from "./types";
 
 const LEASE_MS = 10 * 60_000;
@@ -14,13 +15,17 @@ const dayStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate(
 const sameDay = (a: Date | null, d0: Date) => !!a && a >= d0 && +a < +d0 + 86400_000;
 const normCompany = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
-/** Adds every tailored, open, takeable job without an application row to the queue. Unsupported sites are "manual". */
-export async function queueApplications(): Promise<{ queued: number; manual: number }> {
+/**
+ * Adds every tailored, open, takeable job without an application row to the queue. Unsupported sites are "manual".
+ * With jobIds, only those jobs; with picked, they're marked as Sherif's own picks and go first.
+ */
+export async function queueApplications(opts: { jobIds?: number[]; picked?: boolean } = {}): Promise<{ queued: number; manual: number }> {
   const rows = await db.select({ id: jobs.id, applyUrl: jobs.applyUrl }).from(jobs)
     .innerJoin(tailorings, eq(tailorings.jobId, jobs.id))
     .innerJoin(jobScores, eq(jobScores.jobId, jobs.id))
     .leftJoin(applications, eq(applications.jobId, jobs.id))
-    .where(and(isNotNull(tailorings.pdfPath), isNull(jobs.closedAt), ne(jobScores.canTake, "not_possible"), isNull(applications.jobId)));
+    .where(and(isNotNull(tailorings.pdfPath), isNull(jobs.closedAt), ne(jobScores.canTake, "not_possible"), isNull(applications.jobId),
+      opts.jobIds ? inArray(jobs.id, opts.jobIds) : undefined));
   const out = { queued: 0, manual: 0 };
   if (!rows.length) return out;
   const srcs = await db.select().from(jobSources).where(inArray(jobSources.jobId, rows.map((r) => r.id)));
@@ -28,12 +33,40 @@ export async function queueApplications(): Promise<{ queued: number; manual: num
     const t = pickApplyTarget(r, srcs.filter((s) => s.jobId === r.id));
     const manual = t.site === "other";
     await db.insert(applications).values({
-      jobId: r.id, site: t.site, boardKey: t.boardKey, targetUrl: t.url, status: manual ? "manual" : "queued",
+      jobId: r.id, site: t.site, boardKey: t.boardKey, targetUrl: t.url, status: manual ? "manual" : "queued", picked: !!opts.picked,
       reason: manual ? "This site isn't supported yet; apply yourself" : null,
     }).onConflictDoNothing();
     if (manual) out.manual++; else out.queued++;
   }
   return out;
+}
+
+/**
+ * Sherif pressed Apply on a job: tailor it now if needed (any score), then queue it ahead of the app's own picks.
+ * Returns a plain-language error when it can't be applied to.
+ */
+export async function pickJob(jobId: number): Promise<{ ok: true } | { error: string }> {
+  const [row] = await db.select({ job: jobs, s: jobScores, a: applications, t: tailorings }).from(jobs)
+    .leftJoin(jobScores, eq(jobScores.jobId, jobs.id))
+    .leftJoin(applications, eq(applications.jobId, jobs.id))
+    .leftJoin(tailorings, eq(tailorings.jobId, jobs.id))
+    .where(eq(jobs.id, jobId));
+  if (!row) return { error: "This job no longer exists." };
+  if (row.a) {
+    await db.update(applications).set({ picked: true }).where(eq(applications.jobId, jobId));
+    return { ok: true };
+  }
+  if (row.job.closedAt) return { error: "This listing has closed." };
+  if (!row.s || row.job.status !== "scored") return { error: "This job hasn't been scored yet." };
+  if (row.s.canTake === "not_possible") return { error: "You can't take this job (location or visa), so it won't be sent." };
+  if (!row.t?.pdfPath) {
+    const r = await tailorPending({ jobIds: [jobId] });
+    if (r.missingTectonic) return { error: "Can't build the resume PDF: tectonic isn't installed." };
+    if (r.stoppedForBudget) return { error: "The monthly budget is used up, so the resume couldn't be tailored." };
+    if (!r.tailored) return { error: "Tailoring the resume failed. Try again, or check the Resume tab." };
+  }
+  const q = await queueApplications({ jobIds: [jobId], picked: true });
+  return q.queued + q.manual > 0 ? { ok: true } : { error: "Couldn't add this job to the queue." };
 }
 
 /**
@@ -101,7 +134,9 @@ export async function nextApplication(now: Date = new Date()): Promise<{ jobId: 
   };
   // Jobs Sherif skipped, listings that closed, and jobs re-scored as not takeable are never handed out.
   const live = (r: (typeof all)[number]) => r.jobStatus !== "filtered_out" && !r.closedAt && !paused.has(r.a.site) && r.s.canTake !== "not_possible";
-  const best = (x: (typeof all)[number], y: (typeof all)[number]) => composite(y.s, cfg.weights).score - composite(x.s, cfg.weights).score;
+  // Jobs Sherif picked himself go first, then best composite.
+  const best = (x: (typeof all)[number], y: (typeof all)[number]) =>
+    Number(y.a.picked) - Number(x.a.picked) || composite(y.s, cfg.weights).score - composite(x.s, cfg.weights).score;
 
   for (const r of all.filter((r) => r.a.status === "ready_to_submit" && r.a.approved && live(r)).sort(best)) {
     if (capped(r)) continue;
