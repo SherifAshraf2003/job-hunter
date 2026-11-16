@@ -12,6 +12,8 @@ export const config = {
   // Phase 3: applying
   trustRemaining: 10,
   dryRun: true,
+  /** Skills Sherif has really used that aren't on his one-page resume; tailoring may add up to 4 a job asks for. */
+  extraSkills: [] as string[],
   globalPause: false,
   caps: { linkedinDaily: 15, perBoardDaily: 3, globalDaily: 60, perCompany30d: 2 },
   salaryRule: "under_mid" as "under_mid" | "under_min",

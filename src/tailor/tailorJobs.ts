@@ -22,10 +22,13 @@ const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); retur
 
 /**
  * Tailors every eligible job (scored, open, takeable, composite ≥ cutoff, not yet tailored), best first.
+ * With jobIds, tailors only those jobs and skips the score cutoff.
  * Checks the budget before each job; stops cleanly when it's reached, or after 3 errors in a row.
  */
 export async function tailorPending(opts: {
   limit?: number;
+  /** Only these jobs, whatever their score: Sherif picked them himself. */
+  jobIds?: number[];
   generator?: { resume: typeof generateResume; extras: typeof generateExtras };
 } = {}) {
   const gen = opts.generator ?? { resume: generateResume, extras: generateExtras };
@@ -38,7 +41,7 @@ export async function tailorPending(opts: {
       or(isNull(tailorings.jobId), and(isNull(tailorings.pdfPath), lt(tailorings.attempts, 3)))));
   const eligible = rows
     .map((r) => ({ job: r.jobs, composite: composite(r.job_scores, cfg.weights).score, attempts: r.tailorings?.attempts ?? 0 }))
-    .filter((r) => r.composite >= cfg.cutoff)
+    .filter((r) => (opts.jobIds ? opts.jobIds.includes(r.job.id) : r.composite >= cfg.cutoff))
     .sort((a, b) => b.composite - a.composite)
     .slice(0, opts.limit ?? 10_000);
 
@@ -52,7 +55,7 @@ export async function tailorPending(opts: {
   if (!opts.generator) {
     try { await promisify(execFile)("tectonic", ["--version"]); } catch { result.missingTectonic = true; return result; }
   }
-  const profile = await loadProfile();
+  const profile = { ...(await loadProfile()), extraSkills: cfg.extraSkills };
   const baseTex = readFileSync(path.join(process.cwd(), "resume.tex"), "utf8");
   let consecutiveErrors = 0;
 

@@ -58,7 +58,8 @@ export function parseResumeTex(tex: string): BaseProfile {
 
   const skills: Record<string, string[]> = {};
   for (const m of (sections["Skills"] ?? "").matchAll(/\\textbf\{([^}]*?):\}\s*([^\\\n]*)/g)) {
-    skills[clean(m[1])] = m[2].split(",").map((s) => clean(s)).filter(Boolean);
+    // Split on commas outside parentheses: "AWS (ECS, EC2, VPC)" is one skill.
+    skills[clean(m[1])] = m[2].split(/,(?![^()]*\))/).map((s) => clean(s)).filter(Boolean);
   }
 
   const education: BaseProfile["education"] = [];

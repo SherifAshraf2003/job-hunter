@@ -8,7 +8,8 @@ const RULES = `Hard rules (never break these):
 - Use ONLY facts from the candidate's resume. Never add employers, titles, dates, numbers, team sizes, outcomes, tools, or skills that aren't in the source bullet.
 - Every bullet must keep the "source" id of the original bullet it comes from. Never merge two sources into one bullet.
 - You may rephrase into the job's vocabulary, reorder, and drop weaker bullets, but every role keeps at least 2 bullets.
-- Skills may only be reordered or dropped, never added.
+- Skills may be reordered or dropped. The only skills you may add are items from "extraSkills" (skills he has really used), at most 4, and only ones this job asks for. Put each in the most fitting existing category.
+- When the job spells a skill he has differently (Postgres vs PostgreSQL, Node vs Node.js), use the job's spelling.
 - For projects, "text" is the description only; don't repeat the project name.`;
 
 function profileForPrompt(p: BaseProfile) {
@@ -17,6 +18,7 @@ function profileForPrompt(p: BaseProfile) {
     roles: p.roles.map((r, i) => ({ roleIdx: i, title: r.title, org: r.org, dates: r.dates, bullets: r.bullets.map((text, j) => ({ source: `r${i}b${j}`, text })) })),
     projects: p.projects.map((x, i) => ({ source: `p${i}`, name: x.name, text: x.text })),
     skills: p.skills,
+    extraSkills: p.extraSkills ?? [],
   };
 }
 

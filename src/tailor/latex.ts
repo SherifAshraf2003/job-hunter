@@ -1,3 +1,4 @@
+import { sameSkill } from "./keywords";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -99,9 +100,14 @@ export async function compilePdf(tex: string, outDir: string): Promise<{ pdfPath
   return { pdfPath, pages };
 }
 
-/** One trim step: last project, then the last bullet of the longest role (min 2), then the quote. Null when nothing is left to trim. */
-function trimOnce(r: TailoredResume): TailoredResume | null {
+/** One trim step: an added extra skill first (his own content wins), then the last project, then the last bullet of the longest role (min 2), then the quote. Null when nothing is left to trim. */
+export function trimOnce(r: TailoredResume, p: BaseProfile): TailoredResume | null {
   const t = structuredClone(r);
+  const own = Object.values(p.skills).flat();
+  for (const cat of [...t.skills].reverse()) {
+    const i = cat.items.findLastIndex((it) => !own.some((o) => sameSkill(o, it)) && (p.extraSkills ?? []).some((x) => sameSkill(x, it)));
+    if (i >= 0) { cat.items.splice(i, 1); t.skills = t.skills.filter((c) => c.items.length); return t; }
+  }
   if (t.projects.length) { t.projects.pop(); return t; }
   const longest = [...t.roles].sort((a, b) => b.bullets.length - a.bullets.length)[0];
   if (longest && longest.bullets.length > 2) { longest.bullets.pop(); return t; }
@@ -114,7 +120,7 @@ export async function fitOnePage(r: TailoredResume, p: BaseProfile, baseTex: str
   for (let i = 0; i <= 8; i++) {
     const { pdfPath, pages } = await compilePdf(renderTex(cur, p, baseTex), outDir);
     if (pages <= 1) return { resume: cur, pdfPath };
-    const next = trimOnce(cur);
+    const next = trimOnce(cur, p);
     if (!next) break;
     cur = next;
   }

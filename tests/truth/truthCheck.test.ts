@@ -175,3 +175,33 @@ test("I3: claim-check verdicts: missing ids, bad shape, and odd spacing count as
   expect(parseVerdicts({ flagged: ["r0b1"] }, ["r0b1", "r0b2"])).toEqual(["r0b1", "r0b2"]);
   expect(parseVerdicts({ verdicts: { " R0B1 ": "OK" } }, ["r0b1"])).toEqual([]);
 });
+
+const withSkills = (items: string[]): TailoredResume => {
+  const r = baseResume(p);
+  r.skills = [{ category: "Databases", items }];
+  return r;
+};
+
+test("keeps a skill spelled the job's way when it's an alias of a real one", async () => {
+  const { resume } = await truthCheck(withSkills(["Postgres"]), p, "m", noFlags);
+  expect(resume.skills[0].items).toEqual(["Postgres"]);
+});
+
+test("keeps an extra skill Sherif listed himself, drops one he didn't", async () => {
+  const { resume, issues } = await truthCheck(withSkills(["Docker", "Kubernetes"]), { ...p, extraSkills: ["Docker"] }, "m", noFlags);
+  expect(resume.skills[0].items).toEqual(["Docker"]);
+  expect(issues.some((i) => i.problem.includes("Kubernetes"))).toBe(true);
+});
+
+test("adds at most 4 extra skills", async () => {
+  const extra = ["Docker", "Rails", "Go", "Vue", "Kafka"];
+  const { resume } = await truthCheck(withSkills(extra), { ...p, extraSkills: extra }, "m", noFlags);
+  expect(resume.skills[0].items).toHaveLength(4);
+});
+
+test("the first word of a bulleted line in the job ad isn't treated as a tool name", async () => {
+  const src = sourceText(p, "r0b2")!;
+  const text = `${src} for teams to use`;
+  const { resume } = await truthCheck(withBullet(text, "r0b2"), p, "m", noFlags, "Responsibilities:\n- Use and extend our platforms.\n• Build things.");
+  expect(bulletFor(resume, "r0b2")!.text).toBe(text);
+});

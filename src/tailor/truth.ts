@@ -1,3 +1,4 @@
+import { sameSkill } from "./keywords";
 import { chatJSON } from "../llm/openrouter";
 import type { BaseProfile } from "../profile/types";
 import type { SourceRef, TailoredResume, TruthIssue } from "./types";
@@ -62,7 +63,8 @@ const stripPunct = (w: string) => w.replace(/^[(\[{`"'“‘*_]+|[)\]}`"'”’*
 function jobTerms(jobText: string, known: string): Set<string> {
   const out = new Set<string>();
   for (const sentence of jobText.split(/(?<=[.!?:\n])\s+/)) {
-    sentence.split(/\s+/).slice(1).forEach((raw) => {
+    // A list marker ("-", "•", "*", "1.") starts the line, so the word after it is a sentence start too.
+    sentence.split(/\s+/).filter((w) => !/^([-•*–—]|\d+[.)])$/.test(w)).slice(1).forEach((raw) => {
       for (const part of stripPunct(raw).split(/[-/,]/)) {
         const w = stripPunct(part);
         if (w.length < 2 || !/[A-Z]/.test(w)) continue;
@@ -180,13 +182,25 @@ export async function truthCheck(
   // Skills: categories must be the resume's own; items must be real skills.
   const baseCats = new Map(Object.keys(p.skills).map((c) => [c.toLowerCase().trim(), c]));
   const baseSkills = new Set(Object.values(p.skills).flat().map((s) => s.toLowerCase()));
+  const baseList = Object.values(p.skills).flat();
+  const extra = p.extraSkills ?? [];
+  let extrasUsed = 0;
   out.skills = out.skills.flatMap((cat) => {
     const real = baseCats.get(String(cat.category).toLowerCase().trim());
     if (!real) { issues.push({ where: "skills", problem: `category "${cat.category}" isn't on your resume`, action: "dropped" }); return []; }
     const items = cat.items.filter((it) => {
-      const ok = baseSkills.has(String(it).toLowerCase()) || (ALLOWED_CHARS.test(it) && knows(known, it) && !ctx.job.has(it.toLowerCase()));
-      if (!ok) issues.push({ where: "skills", problem: `skill "${it}" isn't on your resume`, action: "dropped" });
-      return ok;
+      // His own skills, in his spelling or the job's (Postgres for PostgreSQL), or ones the resume text already shows.
+      const own = baseSkills.has(String(it).toLowerCase()) || baseList.some((b) => sameSkill(b, String(it)))
+        || (ALLOWED_CHARS.test(it) && knows(known, it) && !ctx.job.has(it.toLowerCase()));
+      if (own) return true;
+      // Extra skills he listed himself, at most 4 per resume.
+      if (extra.some((x) => sameSkill(x, String(it)))) {
+        if (extrasUsed < 4) { extrasUsed++; return true; }
+        issues.push({ where: "skills", problem: `skill "${it}" left out: at most 4 extra skills per resume`, action: "dropped" });
+        return false;
+      }
+      issues.push({ where: "skills", problem: `skill "${it}" isn't on your resume or your extra skills list`, action: "dropped" });
+      return false;
     });
     return items.length ? [{ category: real, items }] : [];
   });

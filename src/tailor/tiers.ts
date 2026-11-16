@@ -19,10 +19,9 @@ export function assignTiers(list: { id: number; composite: number }[], cfg: Conf
 
 /** Model and rewrite depth for a tier, degraded as month-to-date spend approaches the cap (spec section 7). */
 export function pickTreatment(tier: Tier, monthSpendRatio: number): Treatment {
-  const effective: Tier = monthSpendRatio >= 0.9 ? "bottom" : monthSpendRatio >= 0.7 && tier === "top" ? "middle" : tier;
-  if (effective === "top") return { tier, resumeModel: TOP_MODEL, extrasModel: MID_MODEL, rewrite: "full" };
-  if (effective === "middle") return { tier, resumeModel: MID_MODEL, extrasModel: MID_MODEL, rewrite: "reorder" };
-  return { tier, resumeModel: MID_MODEL, extrasModel: MID_MODEL, rewrite: "keywords" };
+  // Every tier gets a full rewrite (about $0.02): a light one barely changed the resume. Only near the cap does it fall back.
+  if (monthSpendRatio >= 0.9) return { tier, resumeModel: MID_MODEL, extrasModel: MID_MODEL, rewrite: "reorder" };
+  return { tier, resumeModel: tier === "top" ? TOP_MODEL : MID_MODEL, extrasModel: MID_MODEL, rewrite: "full" };
 }
 
 /** Upper-bound cost of one job's tailoring (resume + cover letter + claim check), used for the budget check. */

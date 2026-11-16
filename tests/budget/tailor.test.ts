@@ -9,21 +9,15 @@ import { parseResumeFile } from "@/profile/load";
 beforeEach(async () => { await resetDb(); });
 afterAll(async () => { await closeDb(); });
 
-describe("pickTreatment degrades with month spend", () => {
-  test("normal spend: top tier gets the top model and a full rewrite", () => {
-    const t = pickTreatment("top", 0.5);
-    expect(t.resumeModel).toBe(TOP_MODEL);
-    expect(t.rewrite).toBe("full");
+describe("pickTreatment", () => {
+  test("every tier gets a full rewrite at normal spend", () => {
+    for (const tier of ["top", "middle", "bottom"] as const) expect(pickTreatment(tier, 0.75).rewrite).toBe("full");
+    expect(pickTreatment("top", 0.5).resumeModel).toBe(TOP_MODEL);
   });
-  test("at 70%+ the top tier gets the middle treatment", () => {
-    const t = pickTreatment("top", 0.75);
-    expect(t.resumeModel).toBe(MID_MODEL);
+  test("at 90%+ of the month's budget it falls back to a light rewrite", () => {
+    const t = pickTreatment("top", 0.95);
     expect(t.rewrite).toBe("reorder");
-    expect(t.tier).toBe("top");
-  });
-  test("at 90%+ every tier gets the bottom treatment", () => {
-    expect(pickTreatment("middle", 0.95).rewrite).toBe("keywords");
-    expect(pickTreatment("top", 0.95).rewrite).toBe("keywords");
+    expect(t.resumeModel).toBe(MID_MODEL);
   });
 });
 
@@ -51,4 +45,22 @@ test("tailorPending stops when budget would be exceeded", async () => {
   expect(r.tailored).toBe(0);
   expect(called).toBe(0);
   expect(await db.select().from(tailorings)).toHaveLength(0);
+});
+
+test("tailorPending with jobIds tailors only those jobs, even below the cutoff", async () => {
+  await db.insert(profile).values({ id: 1, data: parseResumeFile() });
+  const mk = async (key: string, s: number) => {
+    const [j] = await db.insert(jobs).values({ key, title: "Engineer", companyName: key, applyUrl: "https://x", status: "scored" }).returning();
+    await db.insert(jobScores).values({ jobId: j.id, engine: "jev", scope: s, company: s, pay: s, level: s, fit: s, canTake: "remote_from_egypt", canTakeConfidence: 0.9 });
+    return j.id;
+  };
+  const low = await mk("low", 30);
+  await mk("high", 90);
+  const seen: number[] = [];
+  const fake = {
+    resume: async (job: { id: number }) => { seen.push(job.id); throw new Error("stop here"); },
+    extras: async () => { throw new Error("unused"); },
+  };
+  await tailorPending({ generator: fake as never, jobIds: [low] });
+  expect(seen).toEqual([low]);
 });
