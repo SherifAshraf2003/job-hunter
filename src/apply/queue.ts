@@ -2,7 +2,7 @@ import { and, eq, inArray, isNotNull, isNull, lt, ne } from "drizzle-orm";
 import { db } from "../db/client";
 import { applications, jobs, jobScores, jobSources, sites, tailorings } from "../db/schema";
 import { loadSettings, saveSetting } from "../config";
-import { composite } from "../scoring/composite";
+import { composite, TOO_SENIOR_LEVEL } from "../scoring/composite";
 import { pickApplyTarget } from "./sites";
 import { tailorPending } from "../tailor/tailorJobs";
 import type { Site } from "./types";
@@ -132,8 +132,10 @@ export async function nextApplication(now: Date = new Date()): Promise<{ jobId: 
     if (atsToday >= cfg.caps.globalDaily) { reason = "Daily application cap reached"; return true; }
     return false;
   };
-  // Jobs Sherif skipped, listings that closed, and jobs re-scored as not takeable are never handed out.
-  const live = (r: (typeof all)[number]) => r.jobStatus !== "filtered_out" && !r.closedAt && !paused.has(r.a.site) && r.s.canTake !== "not_possible";
+  // Jobs Sherif skipped, listings that closed, jobs re-scored as not takeable, and jobs clearly too senior for him
+  // (unless he picked them himself) are never handed out.
+  const live = (r: (typeof all)[number]) => r.jobStatus !== "filtered_out" && !r.closedAt && !paused.has(r.a.site) && r.s.canTake !== "not_possible"
+    && (r.a.picked || r.s.level >= TOO_SENIOR_LEVEL);
   // Jobs Sherif picked himself go first, then best composite.
   const best = (x: (typeof all)[number], y: (typeof all)[number]) =>
     Number(y.a.picked) - Number(x.a.picked) || composite(y.s, cfg.weights).score - composite(x.s, cfg.weights).score;

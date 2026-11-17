@@ -1,7 +1,7 @@
-import { and, eq, inArray, isNull, isNotNull, sql, desc, type SQL } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, isNotNull, or, sql, desc, type SQL } from "drizzle-orm";
 import { db } from "../db/client";
 import { applications, jobs, jobScores, jobSources, runs, tailorings } from "../db/schema";
-import { composite } from "../scoring/composite";
+import { composite, TOO_SENIOR_LEVEL } from "../scoring/composite";
 import type { Weights } from "../config";
 
 export type JobFilters = {
@@ -150,11 +150,14 @@ export function todoRank(a: typeof applications.$inferSelect): number {
   return { needs_you: 1, manual: 2, failed: 3 }[a.status as string] ?? 4;
 }
 
+/** Jobs clearly too senior for him stay off the Apply tab (and out of Chrome's queue) unless he picked them himself. */
+const notTooSenior = () => or(eq(applications.picked, true), gte(jobScores.level, TOO_SENIOR_LEVEL));
+
 export async function listApplications(group: "todo" | "sent", w: Weights): Promise<AppJob[]> {
   const statuses = group === "todo" ? TODO_STATUSES : SENT_STATUSES;
   const rows = await db.select().from(applications).innerJoin(jobs, eq(jobs.id, applications.jobId))
     .leftJoin(jobScores, eq(jobScores.jobId, jobs.id))
-    .where(and(inArray(applications.status, [...statuses]), group === "todo" ? isNull(jobs.closedAt) : undefined));
+    .where(and(inArray(applications.status, [...statuses]), group === "todo" ? and(isNull(jobs.closedAt), notTooSenior()) : undefined));
   const ranked = rank(rows, w, new Map()).map((r, i) => ({ ...r, app: rows[i].applications }));
   const order = (r: AppJob) => (group === "todo" ? todoRank(r.app) : SENT_STATUSES.indexOf(r.app.status as (typeof SENT_STATUSES)[number]));
   ranked.sort((a, b) => order(a) - order(b) || Number(b.app.picked) - Number(a.app.picked)
@@ -165,11 +168,13 @@ export async function listApplications(group: "todo" | "sent", w: Weights): Prom
 
 /** Counts for the three tabs. "fresh" matches the default Jobs to look at list (takeable, open, scored, no application). */
 export async function tabCounts(): Promise<{ todo: number; sent: number; fresh: number }> {
-  const apps = await db.select({ status: applications.status, closed: jobs.closedAt }).from(applications).innerJoin(jobs, eq(jobs.id, applications.jobId));
+  const apps = await db.select({ status: applications.status, closed: jobs.closedAt, picked: applications.picked, level: jobScores.level })
+    .from(applications).innerJoin(jobs, eq(jobs.id, applications.jobId)).leftJoin(jobScores, eq(jobScores.jobId, jobs.id));
   const [f] = await db.select({ n: sql<number>`count(*)::int` }).from(jobs).leftJoin(jobScores, eq(jobScores.jobId, jobs.id))
     .where(where({ stage: "scored", fresh: true, canTake: true }));
   return {
-    todo: apps.filter((a) => !a.closed && (TODO_STATUSES as readonly string[]).includes(a.status)).length,
+    todo: apps.filter((a) => !a.closed && (TODO_STATUSES as readonly string[]).includes(a.status)
+      && (a.picked || (a.level ?? 0) >= TOO_SENIOR_LEVEL)).length,
     sent: apps.filter((a) => (SENT_STATUSES as readonly string[]).includes(a.status)).length,
     fresh: f?.n ?? 0,
   };

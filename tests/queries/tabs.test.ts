@@ -41,3 +41,13 @@ test("Jobs to look at: only jobs without an application", async () => {
   expect(ids).toEqual([fresh]);
   expect(await tabCounts()).toEqual({ todo: 1, sent: 0, fresh: 1 });
 });
+
+test("Apply tab hides jobs that are too senior for him, unless he picked them", async () => {
+  const senior = await mk(20, { status: "ready_to_submit" });
+  const picked = await mk(20, { status: "queued", picked: true });
+  const ok = await mk(70, { status: "queued" });
+  const ids = (await listApplications("todo", config.weights)).map((r) => r.id);
+  expect(ids).not.toContain(senior);
+  expect(ids).toEqual(expect.arrayContaining([picked, ok]));
+  expect((await tabCounts()).todo).toBe(2);
+});

@@ -215,3 +215,17 @@ test("pickJob refuses a job he can't take", async () => {
   expect(await pickJob(id)).toHaveProperty("error");
   expect(await status(id)).toBeUndefined();
 });
+
+test("never hands out a job that is too senior for him, unless he picked it himself", async () => {
+  const senior = await mkJob({ score: 95 });
+  const picked = await mkJob({ score: 95 });
+  const ok = await mkJob({ score: 70 });
+  await db.update(jobScores).set({ level: 10 }).where(eq(jobScores.jobId, senior));
+  await db.update(jobScores).set({ level: 10 }).where(eq(jobScores.jobId, picked));
+  await queueApplications();
+  await setApp(senior, { status: "ready_to_submit", approved: true });
+  await setApp(picked, { picked: true });
+  expect(await nextApplication(NOW)).toMatchObject({ jobId: picked });
+  expect(await nextApplication(NOW)).toMatchObject({ jobId: ok });
+  expect(await nextApplication(NOW)).toHaveProperty("idle");
+});
