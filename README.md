@@ -4,6 +4,8 @@ A job-hunting agent that runs on your own machine. It finds software jobs, ranks
 
 I built it for my own search: an engineer in Egypt applying to remote, Egypt-based and relocation roles. Out of the box it is set up for me; [Make it yours](#make-it-yours) lists the files to change for your own search.
 
+![The Apply tab: jobs waiting for approval on the left, the selected job's score breakdown and tailored resume on the right](docs/screenshot.png)
+
 ## What it does
 
 1. **Finds jobs** every few hours from company job boards (Greenhouse, Lever, Ashby, Workable), RemoteOK, We Work Remotely, Hacker News "Who is hiring", and optionally LinkedIn search results.
